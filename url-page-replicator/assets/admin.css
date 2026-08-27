@@ -1,0 +1,294 @@
+/**
+ * Custom modern admin panel styles for WordPress URL Page Replicator Client
+ */
+
+.upr-admin-wrap {
+	margin: 20px 20px 0 0;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+	color: #2c3338;
+}
+
+/* Header section with modern gradient and typography */
+.upr-header {
+	background: linear-gradient(135deg, #4f46e5 0%, #312e81 100%);
+	padding: 30px 40px;
+	border-radius: 12px;
+	box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+	margin-bottom: 30px;
+	color: #ffffff;
+	position: relative;
+	overflow: hidden;
+}
+
+.upr-header::before {
+	content: '';
+	position: absolute;
+	top: -50%;
+	right: -10%;
+	width: 300px;
+	height: 300px;
+	background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);
+	pointer-events: none;
+}
+
+.upr-logo {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 8px;
+}
+
+.upr-logo .dashicons {
+	font-size: 32px;
+	width: 32px;
+	height: 32px;
+	color: #a5b4fc;
+}
+
+.upr-logo h1 {
+	font-size: 28px;
+	font-weight: 700;
+	color: #ffffff;
+	margin: 0;
+	padding: 0;
+	line-height: 1.2;
+}
+
+.upr-tagline {
+	font-size: 15px;
+	color: #cbd5e1;
+	margin: 0;
+	max-width: 600px;
+}
+
+/* Layout Grid */
+.upr-grid {
+	display: grid;
+	grid-template-columns: 1.2fr 0.8fr;
+	gap: 24px;
+}
+
+@media (max-width: 960px) {
+	.upr-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+/* Modern Card Layout with Glassmorphism shadow */
+.upr-card {
+	background: #ffffff;
+	border-radius: 12px;
+	border: 1px solid #e2e8f0;
+	box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+	padding: 30px;
+	margin-bottom: 24px;
+	transition: transform 0.2s ease, box-shadow 0.2s ease;
+	box-sizing: border-box;
+}
+
+.upr-card:hover {
+	box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+}
+
+.upr-card h2 {
+	font-size: 18px;
+	font-weight: 600;
+	color: #1e293b;
+	margin-top: 0;
+	margin-bottom: 24px;
+	padding-bottom: 12px;
+	border-bottom: 2px solid #f1f5f9;
+}
+
+/* Form Styles */
+.upr-form-group {
+	margin-bottom: 20px;
+}
+
+.upr-form-group label {
+	display: block;
+	font-weight: 600;
+	font-size: 14px;
+	color: #475569;
+	margin-bottom: 8px;
+}
+
+.upr-form-group input[type="url"],
+.upr-form-group input[type="text"],
+.upr-form-group select {
+	width: 100%;
+	height: 42px;
+	padding: 8px 12px;
+	border-radius: 8px;
+	border: 1px solid #cbd5e1;
+	background-color: #f8fafc;
+	font-size: 14px;
+	transition: all 0.2s ease;
+	box-sizing: border-box;
+}
+
+.upr-form-group input[type="url"]:focus,
+.upr-form-group input[type="text"]:focus,
+.upr-form-group select:focus {
+	border-color: #6366f1;
+	background-color: #ffffff;
+	box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+	outline: none;
+}
+
+.upr-desc {
+	font-size: 12px;
+	color: #64748b;
+	margin: 6px 0 0 0;
+}
+
+/* Replicate Button */
+.upr-btn-submit {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	width: 100%;
+	height: 46px;
+	background: #4f46e5;
+	color: #ffffff;
+	border: none;
+	border-radius: 8px;
+	font-size: 15px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2), 0 2px 4px -1px rgba(79, 70, 229, 0.1);
+}
+
+.upr-btn-submit:hover {
+	background: #4338ca;
+	transform: translateY(-1px);
+	box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3), 0 4px 6px -2px rgba(79, 70, 229, 0.15);
+}
+
+.upr-btn-submit:active {
+	background: #3730a3;
+	transform: translateY(1px);
+}
+
+/* Feedback Box */
+.upr-feedback-box {
+	margin-top: 24px;
+	padding: 16px;
+	border-radius: 8px;
+	font-size: 14px;
+	line-height: 1.5;
+	border: 1px solid #e2e8f0;
+}
+
+.upr-feedback-box.success {
+	background-color: #ecfdf5;
+	border-color: #a7f3d0;
+	color: #065f46;
+}
+
+.upr-feedback-box.error {
+	background-color: #fef2f2;
+	border-color: #fca5a5;
+	color: #991b1b;
+}
+
+.upr-feedback-box a {
+	font-weight: 600;
+	color: #4f46e5;
+	text-decoration: underline;
+}
+
+/* Table Style for Replicated Pages */
+.upr-table-wrapper {
+	overflow-x: auto;
+}
+
+.upr-table {
+	width: 100%;
+	border-collapse: collapse;
+	text-align: left;
+}
+
+.upr-table th {
+	padding: 12px 16px;
+	background: #f8fafc;
+	color: #475569;
+	font-weight: 600;
+	font-size: 13px;
+	border-bottom: 1px solid #e2e8f0;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.upr-table td {
+	padding: 16px;
+	border-bottom: 1px solid #f1f5f9;
+	color: #334155;
+	vertical-align: middle;
+}
+
+.upr-table tr:hover td {
+	background-color: #f8fafc;
+}
+
+.upr-row-meta {
+	font-size: 11px;
+	color: #64748b;
+	margin-top: 4px;
+}
+
+.upr-action-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	border-radius: 6px;
+	background: #f1f5f9;
+	color: #475569;
+	border: 1px solid #e2e8f0;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	text-decoration: none;
+}
+
+.upr-view-btn:hover {
+	background-color: #dcfce7;
+	border-color: #bbf7d0;
+	color: #15803d;
+}
+
+.upr-delete-btn:hover {
+	background-color: #fee2e2;
+	border-color: #fecaca;
+	color: #b91c1c;
+}
+
+/* Nav Tab Overrides for WordPress style integration */
+.upr-nav-tab-wrapper {
+	margin-bottom: 24px;
+	border-bottom: 1px solid #cbd5e1;
+	display: flex;
+	gap: 8px;
+}
+
+.upr-nav-tab {
+	padding: 10px 16px;
+	text-decoration: none;
+	font-weight: 600;
+	color: #64748b;
+	border-bottom: 3px solid transparent;
+	font-size: 14px;
+	transition: all 0.15s ease;
+}
+
+.upr-nav-tab:hover {
+	color: #4f46e5;
+}
+
+.upr-nav-tab.active {
+	color: #4f46e5;
+	border-bottom-color: #4f46e5;
+}

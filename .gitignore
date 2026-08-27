@@ -1,0 +1,6 @@
+# Git ignore file for URL Page Replicator Suite
+**/node_modules/
+**/*.tmp
+**/*.log
+.DS_Store
+Thumbs.db

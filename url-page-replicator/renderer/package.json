@@ -1,0 +1,11 @@
+{
+  "name": "upr-headless-renderer",
+  "version": "1.0.0",
+  "description": "Headless Chrome rendering bridge for URL Page Replicator",
+  "main": "render.js",
+  "dependencies": {
+    "puppeteer-core": "^22.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
