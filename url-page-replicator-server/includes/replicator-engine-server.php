@@ -565,16 +565,37 @@ function uprs_process_webpage( $html, $base_url, $target_path, $target_url ) {
 		$title = $title_tags->item( 0 )->nodeValue;
 	}
 
-	// 1. Process stylesheet link tags
+	// 0. Fix no-js class (Apple.com and modern sites hide navigation/animations if no-js is present)
+	$html_tags = $dom->getElementsByTagName( 'html' );
+	if ( $html_tags->length > 0 ) {
+		$html_el = $html_tags->item( 0 );
+		$html_class = $html_el->getAttribute( 'class' );
+		if ( strpos( $html_class, 'no-js' ) !== false ) {
+			$html_el->setAttribute( 'class', str_replace( 'no-js', 'js', $html_class ) );
+		}
+	}
+	$xpath = new DOMXPath( $dom );
+	$globalnav_nodes = $xpath->query( '//*[@id="globalnav"]' );
+	if ( $globalnav_nodes && $globalnav_nodes->length > 0 ) {
+		$nav_el = $globalnav_nodes->item( 0 );
+		$nav_class = $nav_el->getAttribute( 'class' );
+		if ( strpos( $nav_class, 'no-js' ) !== false ) {
+			$nav_el->setAttribute( 'class', preg_replace( '/\bno-js\b/', 'js', $nav_class ) );
+		}
+	}
+
+	// 1. Process stylesheet link tags & preloads
 	$links = $dom->getElementsByTagName( 'link' );
 	for ( $i = $links->length - 1; $i >= 0; $i-- ) {
 		$link = $links->item( $i );
-		$rel  = $link->getAttribute( 'rel' );
+		$rel  = strtolower( $link->getAttribute( 'rel' ) );
 		$href = $link->getAttribute( 'href' );
-		if ( 'stylesheet' === strtolower( $rel ) && ! empty( $href ) ) {
-			$local_url = uprs_download_and_localize_image( $href, $base_url, $target_path, $target_url, 'css' );
-			if ( $local_url ) {
-				$link->setAttribute( 'href', $local_url );
+		if ( ! empty( $href ) ) {
+			if ( 'stylesheet' === $rel || strpos( $rel, 'preload' ) !== false || strpos( $rel, 'icon' ) !== false ) {
+				$local_url = uprs_download_and_localize_image( $href, $base_url, $target_path, $target_url, 'css' );
+				if ( $local_url ) {
+					$link->setAttribute( 'href', $local_url );
+				}
 			}
 		}
 	}
@@ -611,7 +632,7 @@ function uprs_process_webpage( $html, $base_url, $target_path, $target_url ) {
 		}
 	}
 
-	// 3. Process images
+	// 3. Process images (src, srcset, data-src, data-srcset)
 	$images = $dom->getElementsByTagName( 'img' );
 	for ( $i = $images->length - 1; $i >= 0; $i-- ) {
 		$img = $images->item( $i );
@@ -620,6 +641,67 @@ function uprs_process_webpage( $html, $base_url, $target_path, $target_url ) {
 			$local_url = uprs_download_and_localize_image( $src, $base_url, $target_path, $target_url );
 			if ( $local_url ) {
 				$img->setAttribute( 'src', $local_url );
+			}
+		}
+
+		$srcset = $img->getAttribute( 'srcset' );
+		if ( ! empty( $srcset ) ) {
+			$img->setAttribute( 'srcset', uprs_localize_srcset( $srcset, $base_url, $target_path, $target_url ) );
+		}
+
+		$data_src = $img->getAttribute( 'data-src' );
+		if ( ! empty( $data_src ) ) {
+			$local_data_src = uprs_download_and_localize_image( $data_src, $base_url, $target_path, $target_url );
+			if ( $local_data_src ) {
+				$img->setAttribute( 'data-src', $local_data_src );
+				if ( empty( $src ) || strpos( $src, 'data:' ) === 0 ) {
+					$img->setAttribute( 'src', $local_data_src );
+				}
+			}
+		}
+
+		$data_srcset = $img->getAttribute( 'data-srcset' );
+		if ( ! empty( $data_srcset ) ) {
+			$local_data_srcset = uprs_localize_srcset( $data_srcset, $base_url, $target_path, $target_url );
+			$img->setAttribute( 'data-srcset', $local_data_srcset );
+			if ( empty( $srcset ) ) {
+				$img->setAttribute( 'srcset', $local_data_srcset );
+			}
+		}
+	}
+
+	// 4. Process picture sources (<source srcset>)
+	$sources = $dom->getElementsByTagName( 'source' );
+	for ( $i = $sources->length - 1; $i >= 0; $i-- ) {
+		$source = $sources->item( $i );
+		$srcset = $source->getAttribute( 'srcset' );
+
+		// If the source is an empty base64 placeholder, remove it so it doesn't mask the real image
+		if ( $source->hasAttribute( 'data-empty' ) || ( $srcset && 0 === strpos( trim( $srcset ), 'data:' ) ) ) {
+			if ( $source->parentNode ) {
+				$source->parentNode->removeChild( $source );
+			}
+			continue;
+		}
+
+		if ( ! empty( $srcset ) ) {
+			$source->setAttribute( 'srcset', uprs_localize_srcset( $srcset, $base_url, $target_path, $target_url ) );
+		}
+
+		$src = $source->getAttribute( 'src' );
+		if ( ! empty( $src ) ) {
+			$local_src = uprs_download_and_localize_image( $src, $base_url, $target_path, $target_url );
+			if ( $local_src ) {
+				$source->setAttribute( 'src', $local_src );
+			}
+		}
+
+		$data_srcset = $source->getAttribute( 'data-srcset' );
+		if ( ! empty( $data_srcset ) ) {
+			$local_data_srcset = uprs_localize_srcset( $data_srcset, $base_url, $target_path, $target_url );
+			$source->setAttribute( 'data-srcset', $local_data_srcset );
+			if ( empty( $srcset ) ) {
+				$source->setAttribute( 'srcset', $local_data_srcset );
 			}
 		}
 	}
@@ -651,6 +733,32 @@ function uprs_process_webpage( $html, $base_url, $target_path, $target_url ) {
 	);
 
 	return array( 'html' => $final_html, 'title' => $title );
+}
+}
+
+// Localize srcset attributes for responsive images and pictures
+if ( ! function_exists( 'uprs_localize_srcset' ) ) {
+function uprs_localize_srcset( $srcset, $base_url, $target_path, $target_url ) {
+	if ( empty( $srcset ) || 0 === strpos( trim( $srcset ), 'data:' ) ) {
+		return $srcset;
+	}
+	$sources = explode( ',', $srcset );
+	$localized_sources = array();
+
+	foreach ( $sources as $source ) {
+		$parts = array_filter( explode( ' ', trim( $source ) ) );
+		if ( empty( $parts ) ) {
+			continue;
+		}
+		
+		$url = array_shift( $parts );
+		$localized_url = uprs_download_and_localize_image( $url, $base_url, $target_path, $target_url );
+		
+		$descriptor = ! empty( $parts ) ? ' ' . implode( ' ', $parts ) : '';
+		$localized_sources[] = $localized_url . $descriptor;
+	}
+
+	return implode( ', ', $localized_sources );
 }
 }
 

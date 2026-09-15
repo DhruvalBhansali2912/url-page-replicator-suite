@@ -186,25 +186,32 @@ async function renderPage() {
       });
     });
 
-    // Set iPhone mobile viewport
+    // Set high-resolution desktop viewport by default (or custom CLI dimensions)
+    const vpWidth = parseInt(getArg('--width') || '1440', 10);
+    const vpHeight = parseInt(getArg('--height') || '900', 10);
+    const isMobileVp = vpWidth < 768;
+
     await page.setViewport({ 
-      width: 390, 
-      height: 844,
-      deviceScaleFactor: 3,
-      isMobile: true,
-      hasTouch: true,
-      isLandscape: false
+      width: vpWidth, 
+      height: vpHeight,
+      deviceScaleFactor: isMobileVp ? 2 : 1.5,
+      isMobile: isMobileVp,
+      hasTouch: isMobileVp,
+      isLandscape: !isMobileVp
     });
 
-    // Set iPhone Safari User-Agent (iOS 17.5)
-    await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1');
+    if (isMobileVp) {
+      await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1');
+    } else {
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+    }
 
-    // Set standard mobile browser navigation headers on the primary document request only
+    // Set standard browser navigation headers on the primary document request only
     await page.setRequestInterception(true);
     page.on('request', (request) => {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
         const headers = Object.assign({}, request.headers(), {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
           'Upgrade-Insecure-Requests': '1',
           'Sec-Fetch-Site': 'none',

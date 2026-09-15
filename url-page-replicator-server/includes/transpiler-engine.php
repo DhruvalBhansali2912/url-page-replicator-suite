@@ -274,6 +274,11 @@ function upr_transpiler_build_asset_manifest( $target_path, $html ) {
 					$context = trim( $m[1] );
 				}
 				if ( empty( $context ) ) {
+					if ( preg_match( '/(?:srcset|data-src|data-srcset)=["\'][^"\']*' . preg_quote( $f, '/' ) . '["\'][^>]*alt=["\']([^"\']+)["\']/i', $html, $m ) ) {
+						$context = trim( $m[1] );
+					}
+				}
+				if ( empty( $context ) ) {
 					$clean_name = preg_replace( '/[_-]+/', ' ', pathinfo( $f, PATHINFO_FILENAME ) );
 					$context = ucwords( trim( preg_replace( '/\s+[a-z0-9]{8,}\s*/i', ' ', $clean_name ) ) );
 				}
@@ -281,7 +286,7 @@ function upr_transpiler_build_asset_manifest( $target_path, $html ) {
 			}
 		}
 	}
-	return ! empty( $manifest_lines ) ? implode( "\n", array_slice( $manifest_lines, 0, 40 ) ) : 'No local assets detected.';
+	return ! empty( $manifest_lines ) ? implode( "\n", array_slice( $manifest_lines, 0, 60 ) ) : 'No local assets detected.';
 }
 
 /**
@@ -418,12 +423,28 @@ CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES:
    - In Navbar.tsx, implement a mobile drawer with `useState(false)` and hamburger toggle icons (`Menu` and `X` from 'lucide-react').
    - When opened on mobile, it MUST NOT be a tiny cramped box. It MUST be a full-screen drawer: `fixed inset-x-0 top-12 bottom-0 bg-neutral-950/95 backdrop-blur-2xl z-50 flex flex-col px-8 py-8 space-y-4 overflow-y-auto`.
    - Links inside mobile drawer: `text-2xl font-semibold text-neutral-200 hover:text-white transition-colors border-b border-neutral-800/80 pb-3 block`.
-5. OUTPUT STRUCTURE:
+5. INTERACTIVE CAROUSEL / SLIDER (src/components/Carousel.{$ext}):
+   - You MUST create an interactive, animated Carousel / Slider component (e.g. Apple TV+ slider, product showcase, or testimonials carousel).
+   - Component state & features:
+     * `const [currentIndex, setCurrentIndex] = useState(0);`
+     * `const [isPlaying, setIsPlaying] = useState(true);`
+     * Auto-advance: `useEffect` with `setInterval` advancing slide every 4 seconds when `isPlaying` is true.
+     * Previous / Next buttons: Chevron buttons using `ChevronLeft` and `ChevronRight` from 'lucide-react' (`p-3 rounded-full bg-neutral-900/60 hover:bg-neutral-800 text-white backdrop-blur-md transition-all shadow-lg`).
+     * Pagination dots / pill bar: Clicking any dot jumps to slide (`onClick={() => setCurrentIndex(idx)}`). Active dot expands with `w-8 bg-white transition-all duration-300`, inactive dots `w-2.5 bg-neutral-500 hover:bg-neutral-400`.
+     * Play/Pause toggle button with `Play` and `Pause` icons from 'lucide-react'.
+     * Smooth slide transition: Container with `flex transition-transform duration-700 ease-out` using `style={{ transform: 'translateX(-' + (currentIndex * 100) + '%)' }}`.
+     * Slide cards: Rounded poster cards with images from AVAILABLE LOCAL ASSETS, title, description, and 'Stream now' or 'Learn more' pill CTA.
+6. MICRO-INTERACTIONS & SMOOTH ANIMATIONS:
+   - Navbar: Sticky top with backdrop blur (`sticky top-0 z-40 bg-neutral-900/80 backdrop-blur-md border-b border-neutral-800/60 transition-colors`).
+   - Cards: Subtle hover lift and glow (`transition-all duration-300 hover:scale-[1.01] hover:shadow-2xl`).
+   - Buttons: Responsive hover & click states (`transition-all duration-200 active:scale-95 hover:brightness-110`).
+7. OUTPUT STRUCTURE:
    - Output ONLY the UI components under 'src/':
-     * src/App.{$ext} (default export App, assembling components)
+     * src/App.{$ext} (default export App, assembling Navbar, Hero, PromoGrid, Carousel, and Footer)
      * src/components/Navbar.{$ext}
      * src/components/Hero.{$ext}
      * src/components/PromoGrid.{$ext}
+     * src/components/Carousel.{$ext}
      * src/components/Footer.{$ext}
    - Do NOT output config files (NO package.json, vite.config, tsconfig, or index.html).
    - Output each file inside a markdown code block with '// FILE: path' on the very first line comment:
@@ -440,6 +461,16 @@ CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES:
 
 ```{$ext}
 // FILE: src/components/PromoGrid.{$ext}
+[code here]
+```
+
+```{$ext}
+// FILE: src/components/Carousel.{$ext}
+[code here]
+```
+
+```{$ext}
+// FILE: src/components/Footer.{$ext}
 [code here]
 ```
 
