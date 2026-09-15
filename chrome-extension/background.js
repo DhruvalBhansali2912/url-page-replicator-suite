@@ -10,3 +10,39 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
   console.log('InventKid Page & Component Replicator installed.');
 });
+
+// Proxy API requests from content scripts to bypass Mixed-Content and page CSP restrictions
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'transpile_component') {
+    handleTranspileComponent(request)
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true; // Keep message channel open for async response
+  }
+});
+
+async function handleTranspileComponent(data) {
+  const { serverUrl, apiToken, html, css, format, title } = data;
+  const endpoint = `${serverUrl.replace(/\/$/, '')}/upr-server/v1/transpile-component`;
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiToken}`
+    },
+    body: JSON.stringify({
+      html,
+      css,
+      format,
+      component_name: title
+    })
+  });
+
+  const resData = await response.json();
+  if (!response.ok) {
+    throw new Error(resData.message || `Server returned error ${response.status}`);
+  }
+
+  return { success: true, data: resData };
+}

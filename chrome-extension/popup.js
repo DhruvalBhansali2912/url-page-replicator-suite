@@ -171,32 +171,51 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
+    const tabUrl = activeTab.url || '';
+    if (tabUrl.startsWith('chrome://') || tabUrl.startsWith('edge://') || tabUrl.startsWith('chrome-extension://') || tabUrl.startsWith('about:')) {
+      showAlert('Cannot inspect Chrome internal pages. Please open a website like apple.com, google.com, or github.com first.', 'error');
+      return;
+    }
+
     const format = componentFrameworkSelect.value;
 
-    // Inject content script & styles
+    // Send activation message; if content script isn't loaded yet, inject it dynamically
     try {
-      await chrome.scripting.insertCSS({
-        target: { tabId: activeTab.id },
-        files: ['content-script.css']
-      });
-
-      await chrome.scripting.executeScript({
-        target: { tabId: activeTab.id },
-        files: ['content-script.js']
-      });
-
-      // Send activation message
       await chrome.tabs.sendMessage(activeTab.id, {
         action: 'activate_picker',
         format: format,
         serverUrl: settings.serverUrl,
         apiToken: settings.apiToken
       });
-
-      // Close popup so user can interact with the page
       window.close();
-    } catch (err) {
-      showAlert(`Could not activate element picker on this page: ${err.message}`, 'error');
+    } catch (msgErr) {
+      // Content script not loaded yet (e.g. tab was open before extension installed). Inject and retry:
+      try {
+        await chrome.scripting.insertCSS({
+          target: { tabId: activeTab.id },
+          files: ['content-script.css']
+        });
+        await chrome.scripting.executeScript({
+          target: { tabId: activeTab.id },
+          files: ['content-script.js']
+        });
+
+        setTimeout(async () => {
+          try {
+            await chrome.tabs.sendMessage(activeTab.id, {
+              action: 'activate_picker',
+              format: format,
+              serverUrl: settings.serverUrl,
+              apiToken: settings.apiToken
+            });
+            window.close();
+          } catch (retryErr) {
+            showAlert('Please refresh the webpage and try Activate Component Picker again.', 'error');
+          }
+        }, 120);
+      } catch (injectErr) {
+        showAlert(`Could not inspect page: ${injectErr.message}`, 'error');
+      }
     }
   });
 

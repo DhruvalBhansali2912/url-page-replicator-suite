@@ -1,4 +1,9 @@
 (() => {
+  if (window.__UPR_CONTENT_SCRIPT_INITIALIZED__) {
+    return;
+  }
+  window.__UPR_CONTENT_SCRIPT_INITIALIZED__ = true;
+
   let isPickerActive = false;
   let hoveredElement = null;
   let selectedElement = null;
@@ -39,7 +44,7 @@
     document.addEventListener('click', onElementClick, true);
     document.addEventListener('keydown', onKeyDown, true);
 
-    showToast('🎯 Element Picker active: Hover and click on any component to extract.');
+    showToast('🎯 Element Picker Active: Hover & click any element on this page.');
   }
 
   function stopPicker() {
@@ -57,7 +62,7 @@
   function onMouseMove(e) {
     if (!isPickerActive) return;
     const target = document.elementFromPoint(e.clientX, e.clientY);
-    if (!target || target === overlayEl || target.closest('#upr-picker-overlay') || target.closest('#upr-component-modal')) {
+    if (!target || target === overlayEl || target.closest('#upr-picker-overlay') || target.closest('#upr-component-modal') || target.closest('#upr-toast')) {
       return;
     }
     hoveredElement = target;
@@ -192,19 +197,33 @@
           <input type="text" id="upr-comp-name" value="${guessedName}" />
         </div>
         <div class="upr-form-row">
-          <label>Framework</label>
+          <label>Target Framework</label>
           <select id="upr-comp-format">
             <option value="react-tailwind" ${pickerConfig.format === 'react-tailwind' ? 'selected' : ''}>React + Tailwind</option>
             <option value="react-css" ${pickerConfig.format === 'react-css' ? 'selected' : ''}>React + CSS Modules</option>
             <option value="angular" ${pickerConfig.format === 'angular' ? 'selected' : ''}>Angular 17+ Standalone</option>
-            <option value="html-clean" ${pickerConfig.format === 'html-clean' ? 'selected' : ''}>Clean HTML / CSS</option>
+            <option value="html-clean" ${pickerConfig.format === 'html-clean' ? 'selected' : ''}>Clean Semantic HTML5 + BEM</option>
           </select>
         </div>
-        <div class="upr-modal-actions">
-          <button class="upr-btn-primary" id="upr-copy-btn">
-            <span>📋 Copy Code to Clipboard</span>
+
+        <div id="upr-code-preview-box" style="display:none; margin-top:12px;">
+          <label style="display:block; font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600; margin-bottom:4px;">Generated Component</label>
+          <textarea id="upr-code-textarea" readonly style="width:100%; height:180px; font-family:monospace; font-size:11px; background:#0b1120; color:#38bdf8; border:1px solid #1e293b; border-radius:6px; padding:8px; box-sizing:border-box; resize:vertical;"></textarea>
+        </div>
+
+        <div class="upr-modal-actions" style="margin-top:14px; display:flex; flex-direction:column; gap:8px;">
+          <button class="upr-btn-primary" id="upr-transpile-btn" style="width:100%;">
+            <span>⚡ Generate Clean Component Code</span>
           </button>
-          <button class="upr-btn-secondary" id="upr-repicker-btn">
+          <div id="upr-success-actions" style="display:none; display:flex; gap:8px;">
+            <button class="upr-btn-primary" id="upr-copy-btn" style="flex:1;">
+              <span>📋 Copy Code</span>
+            </button>
+            <button class="upr-btn-secondary" id="upr-download-btn" style="flex:1;">
+              <span>💾 Download File</span>
+            </button>
+          </div>
+          <button class="upr-btn-secondary" id="upr-repicker-btn" style="width:100%;">
             <span>🎯 Pick Another Element</span>
           </button>
         </div>
@@ -213,16 +232,24 @@
 
     document.body.appendChild(modalEl);
 
+    let generatedCode = '';
+
     document.getElementById('upr-close-btn').addEventListener('click', cleanupModal);
     document.getElementById('upr-repicker-btn').addEventListener('click', () => {
       cleanupModal();
       startPicker();
     });
 
-    document.getElementById('upr-copy-btn').addEventListener('click', async () => {
-      const copyBtn = document.getElementById('upr-copy-btn');
-      copyBtn.disabled = true;
-      copyBtn.innerHTML = '<span>⏳ Generating AI Component...</span>';
+    const transpileBtn = document.getElementById('upr-transpile-btn');
+    const previewBox = document.getElementById('upr-code-preview-box');
+    const codeTextarea = document.getElementById('upr-code-textarea');
+    const successActions = document.getElementById('upr-success-actions');
+    const copyBtn = document.getElementById('upr-copy-btn');
+    const downloadBtn = document.getElementById('upr-download-btn');
+
+    transpileBtn.addEventListener('click', async () => {
+      transpileBtn.disabled = true;
+      transpileBtn.innerHTML = '<span>⏳ Transpiling with Gemini AI...</span>';
 
       const compName = document.getElementById('upr-comp-name').value.trim() || 'Component';
       const format = document.getElementById('upr-comp-format').value;
@@ -230,38 +257,65 @@
       const cssSlice = extractMatchedCSS(el);
 
       try {
-        const endpoint = `${pickerConfig.serverUrl.replace(/\/$/, '')}/upr-server/v1/transpile-component`;
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${pickerConfig.apiToken}`
-          },
-          body: JSON.stringify({
-            html: htmlSlice,
-            css: cssSlice,
-            format: format,
-            title: compName
-          })
+        // Send request through background.js service worker to bypass page CSP and Mixed Content
+        const response = await chrome.runtime.sendMessage({
+          action: 'transpile_component',
+          serverUrl: pickerConfig.serverUrl,
+          apiToken: pickerConfig.apiToken,
+          html: htmlSlice,
+          css: cssSlice,
+          format: format,
+          title: compName
         });
 
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.message || `Server returned ${res.status}`);
+        if (!response || !response.success) {
+          throw new Error(response?.error || 'Failed to transpile component.');
         }
 
+        const data = response.data;
         if (data.component) {
-          await navigator.clipboard.writeText(data.component);
-          showToast(`✅ ${compName} copied to clipboard! (1 token consumed)`);
-          cleanupModal();
+          generatedCode = data.component;
+          codeTextarea.value = generatedCode;
+          previewBox.style.display = 'block';
+          successActions.style.display = 'flex';
+          transpileBtn.style.display = 'none';
+
+          // Automatically copy to clipboard as primary convenience
+          await copyToClipboard(generatedCode);
+          showToast(`✅ ${compName} generated and copied to clipboard!`);
         } else {
-          throw new Error('No component code returned.');
+          throw new Error('No component code returned by server.');
         }
       } catch (err) {
         showToast(`❌ Error: ${err.message}`);
-        copyBtn.disabled = false;
-        copyBtn.innerHTML = '<span>📋 Copy Code to Clipboard</span>';
+        transpileBtn.disabled = false;
+        transpileBtn.innerHTML = '<span>⚡ Generate Clean Component Code</span>';
       }
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      if (generatedCode) {
+        await copyToClipboard(generatedCode);
+        showToast('📋 Code copied to clipboard!');
+      }
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      if (!generatedCode) return;
+      const compName = document.getElementById('upr-comp-name').value.trim() || 'Component';
+      const format = document.getElementById('upr-comp-format').value;
+      
+      let ext = '.tsx';
+      if (format === 'angular') ext = '.component.ts';
+      else if (format === 'html-clean') ext = '.html';
+
+      const blob = new Blob([generatedCode], { type: 'text/plain;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${compName}${ext}`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      showToast(`💾 Downloaded ${compName}${ext}!`);
     });
   }
 
@@ -270,6 +324,23 @@
       modalEl.parentNode.removeChild(modalEl);
     }
     modalEl = null;
+  }
+
+  async function copyToClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      // Fallback for pages where navigator.clipboard is restricted
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
   }
 
   function showToast(message) {
@@ -287,6 +358,6 @@
       if (toast && toast.parentNode) {
         toast.parentNode.removeChild(toast);
       }
-    }, 3200);
+    }, 3800);
   }
 })();
