@@ -287,45 +287,57 @@ Return ONLY the valid JSON object.";
  * Sends request to Google Gemini REST API
  */
 function upr_transpiler_query_gemini( $prompt, $api_key, $json_mode = false ) {
-	$model = 'gemini-flash-latest';
-	$endpoint = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$api_key}";
-
-	$body_data = array(
-		'contents' => array(
-			array(
-				'parts' => array(
-					array( 'text' => $prompt )
-				)
-			)
-		),
-		'generationConfig' => array(
-			'temperature'     => 0.2,
-			'maxOutputTokens' => 8192
-		)
+	$candidate_models = array(
+		'gemini-flash-latest',
+		'gemini-3.5-flash',
+		'gemini-3-flash-preview',
+		'gemini-3.5-flash-lite'
 	);
 
-	if ( $json_mode ) {
-		$body_data['generationConfig']['responseMimeType'] = 'application/json';
+	$last_error = 'Gemini API call failed';
+
+	foreach ( $candidate_models as $model ) {
+		$endpoint = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$api_key}";
+
+		$body_data = array(
+			'contents' => array(
+				array(
+					'parts' => array(
+						array( 'text' => $prompt )
+					)
+				)
+			),
+			'generationConfig' => array(
+				'temperature'     => 0.2,
+				'maxOutputTokens' => 8192
+			)
+		);
+
+		if ( $json_mode ) {
+			$body_data['generationConfig']['responseMimeType'] = 'application/json';
+		}
+
+		$response = wp_remote_post( $endpoint, array(
+			'timeout' => 60,
+			'headers' => array( 'Content-Type' => 'application/json' ),
+			'body'    => json_encode( $body_data )
+		) );
+
+		if ( is_wp_error( $response ) ) {
+			$last_error = $response->get_error_message();
+			continue;
+		}
+
+		$status = wp_remote_retrieve_response_code( $response );
+		$body   = wp_remote_retrieve_body( $response );
+		$data   = json_decode( $body, true );
+
+		if ( $status === 200 && isset( $data['candidates'][0]['content']['parts'][0]['text'] ) ) {
+			return $data['candidates'][0]['content']['parts'][0]['text'];
+		}
+
+		$last_error = $data['error']['message'] ?? ( 'Model ' . $model . ' failed with status ' . $status );
 	}
 
-	$response = wp_remote_post( $endpoint, array(
-		'timeout' => 60,
-		'headers' => array( 'Content-Type' => 'application/json' ),
-		'body'    => json_encode( $body_data )
-	) );
-
-	if ( is_wp_error( $response ) ) {
-		return $response;
-	}
-
-	$status = wp_remote_retrieve_response_code( $response );
-	$body   = wp_remote_retrieve_body( $response );
-	$data   = json_decode( $body, true );
-
-	if ( $status !== 200 || ! isset( $data['candidates'][0]['content']['parts'][0]['text'] ) ) {
-		$err_msg = $data['error']['message'] ?? 'Gemini API call failed with status ' . $status;
-		return new WP_Error( 'upr_gemini_error', $err_msg, array( 'status' => $status ) );
-	}
-
-	return $data['candidates'][0]['content']['parts'][0]['text'];
+	return new WP_Error( 'upr_gemini_error', $last_error, array( 'status' => 500 ) );
 }
