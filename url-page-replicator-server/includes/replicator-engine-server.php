@@ -9,7 +9,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 // Main compiler function for standard URL replication
 if ( ! function_exists( 'upr_server_compile_page' ) ) {
-function upr_server_compile_page( $url ) {
+function upr_server_compile_page( $url, $preserve_folder = false ) {
 	$compilation_id = 'upr_' . uniqid() . '_' . time();
 	$upload_dir = wp_upload_dir();
 	
@@ -187,14 +187,18 @@ function upr_server_compile_page( $url ) {
 		return new WP_Error( 'upr_zip_error', 'Failed to generate ZIP archive package.', array( 'status' => 500 ) );
 	}
 
-	// Clean up temporary compilation directory
-	uprs_rrmdir( $target_path );
+	// Clean up temporary compilation directory if not preserving for transpiler
+	if ( ! $preserve_folder ) {
+		uprs_rrmdir( $target_path );
+	}
 
 	return array(
-		'status'       => 'success',
-		'title'        => $metadata['title'],
-		'slug'         => $metadata['slug'],
-		'download_url' => $zip_url
+		'status'         => 'success',
+		'compilation_id' => $compilation_id,
+		'target_path'    => $target_path,
+		'title'          => $metadata['title'],
+		'slug'           => $metadata['slug'],
+		'download_url'   => $zip_url
 	);
 }
 }

@@ -13,9 +13,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 define( 'UPR_SERVER_PATH', plugin_dir_path( __FILE__ ) );
 define( 'UPR_SERVER_URL', plugin_dir_url( __FILE__ ) );
 
-// Hardcoded Gemini API Key (can be set here or in wp-config.php)
+// Hardcoded Gemini API Key (pre-configured for deployment)
 if ( ! defined( 'UPR_GEMINI_API_KEY' ) ) {
-	define( 'UPR_GEMINI_API_KEY', '' ); // Paste your Gemini API key here or define in wp-config.php
+	define( 'UPR_GEMINI_API_KEY', '' ); // Define here or in wp-config.php // <-- Paste your Gemini API key here
 }
 
 // Handle CORS Preflight OPTIONS Requests early
@@ -509,7 +509,8 @@ function upr_server_handle_replicate( WP_REST_Request $request ) {
 	// Expose and run the server compiler
 	require_once UPR_SERVER_PATH . 'includes/replicator-engine-server.php';
 	
-	$package = upr_server_compile_page( $url );
+	$preserve_folder = ( $format !== 'raw' );
+	$package = upr_server_compile_page( $url, $preserve_folder );
 	if ( is_wp_error( $package ) ) {
 		return $package;
 	}
@@ -526,6 +527,10 @@ function upr_server_handle_replicate( WP_REST_Request $request ) {
 			$exports_dir = wp_normalize_path( $upload_dir['basedir'] . '/url-page-replicator-server/exports' );
 			$zip_filepath = $exports_dir . '/' . $package['compilation_id'] . '.zip';
 			uprs_zip_folder( $target_path, $zip_filepath );
+		}
+		// Clean up compilation directory after zipping
+		if ( function_exists( 'uprs_rrmdir' ) ) {
+			uprs_rrmdir( $target_path );
 		}
 	}
 

@@ -9,6 +9,27 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * Resolves Gemini API key with priority:
+ * 1. Hardcoded PHP constant UPR_GEMINI_API_KEY
+ * 2. Environment variable GEMINI_API_KEY
+ * 3. WordPress options (upr_server_gemini_api_key)
+ */
+function upr_get_gemini_api_key() {
+	if ( defined( 'UPR_GEMINI_API_KEY' ) && ! empty( UPR_GEMINI_API_KEY ) ) {
+		return UPR_GEMINI_API_KEY;
+	}
+	$env = getenv( 'GEMINI_API_KEY' );
+	if ( ! empty( $env ) ) {
+		return $env;
+	}
+	$server_opt = get_option( 'upr_server_gemini_api_key', '' );
+	if ( ! empty( $server_opt ) ) {
+		return $server_opt;
+	}
+	return get_option( 'upr_client_gemini_api_key', '' );
+}
+
+/**
  * Main Page Transpiler: converts full replicated page into modern framework project
  */
 function upr_server_transpile_page( $target_path, $compilation_id, $format, $title = 'Replicated Page', $original_url = '' ) {
@@ -17,14 +38,9 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 		return new WP_Error( 'upr_missing_html', 'Target index.html not found for transpilation.', array( 'status' => 404 ) );
 	}
 
-	$gemini_key = get_option( 'upr_server_gemini_api_key', '' );
+	$gemini_key = upr_get_gemini_api_key();
 	if ( empty( $gemini_key ) ) {
-		// Fallback to client key option if set
-		$gemini_key = get_option( 'upr_client_gemini_api_key', '' );
-	}
-
-	if ( empty( $gemini_key ) ) {
-		return new WP_Error( 'upr_missing_gemini_key', 'Gemini API key is not configured on the server. Please add it in Replicator Server settings.', array( 'status' => 500 ) );
+		return new WP_Error( 'upr_missing_gemini_key', 'Gemini API key is not configured. Please define UPR_GEMINI_API_KEY in the plugin or save it in Replicator Server settings.', array( 'status' => 500 ) );
 	}
 
 	$raw_html = file_get_contents( $html_file );
@@ -32,25 +48,31 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 	// 1. Sanitize and prepare DOM for AI processing
 	$sanitized = upr_transpiler_sanitize_dom( $raw_html );
 
-	// 2. Transpile using Gemini AI
+	// 2. Transpile components using Gemini AI
 	$project_files = upr_transpiler_call_gemini( $sanitized['html'], $sanitized['styles'], $format, $title, $gemini_key );
 	if ( is_wp_error( $project_files ) ) {
-		return $project_files;
+		$project_files = array(); // fall back to scaffolded project
 	}
 
-	// 3. Write generated project files into output directory
+	// 3. Scaffold complete runnable project structure (package.json, vite, tailwind, tsconfig, public/)
+	upr_transpiler_scaffold_project( $target_path, $format, $title );
+
+	// 4. Write generated project files into output directory
 	$src_dir = $target_path . '/src';
 	if ( ! is_dir( $src_dir ) ) {
 		wp_mkdir_p( $src_dir );
 	}
 
-	foreach ( $project_files as $file ) {
-		$file_path = wp_normalize_path( $target_path . '/' . ltrim( $file['path'], '/' ) );
-		$dir = dirname( $file_path );
-		if ( ! is_dir( $dir ) ) {
-			wp_mkdir_p( $dir );
+	if ( is_array( $project_files ) ) {
+		foreach ( $project_files as $file ) {
+			if ( empty( $file['path'] ) || empty( $file['content'] ) ) continue;
+			$file_path = wp_normalize_path( $target_path . '/' . ltrim( $file['path'], '/' ) );
+			$dir = dirname( $file_path );
+			if ( ! is_dir( $dir ) ) {
+				wp_mkdir_p( $dir );
+			}
+			file_put_contents( $file_path, $file['content'] );
 		}
-		file_put_contents( $file_path, $file['content'] );
 	}
 
 	// Save transpilation metadata
@@ -67,16 +89,101 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 }
 
 /**
+ * Scaffolds runnable framework templates with dependencies and moves media to public/
+ */
+function upr_transpiler_scaffold_project( $target_path, $format, $title ) {
+	$public_dir = $target_path . '/public';
+	$src_dir = $target_path . '/src';
+	$comp_dir = $src_dir . '/components';
+	$raw_dir = $target_path . '/raw_scraped';
+
+	if ( ! is_dir( $public_dir ) ) wp_mkdir_p( $public_dir );
+	if ( ! is_dir( $src_dir ) ) wp_mkdir_p( $src_dir );
+	if ( ! is_dir( $comp_dir ) ) wp_mkdir_p( $comp_dir );
+	if ( ! is_dir( $raw_dir ) ) wp_mkdir_p( $raw_dir );
+
+	// Move media assets into public/
+	$media_exts = array( 'jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'ico', 'woff2', 'woff', 'ttf' );
+	$files = scandir( $target_path );
+	foreach ( $files as $item ) {
+		if ( $item === '.' || $item === '..' || is_dir( $target_path . '/' . $item ) ) continue;
+		$ext = strtolower( pathinfo( $item, PATHINFO_EXTENSION ) );
+		if ( in_array( $ext, $media_exts ) ) {
+			@rename( $target_path . '/' . $item, $public_dir . '/' . $item );
+		} elseif ( in_array( $ext, array( 'js', 'css', 'html', 'json' ) ) && $item !== 'metadata.json' ) {
+			@rename( $target_path . '/' . $item, $raw_dir . '/' . $item );
+		}
+	}
+
+	$slug = sanitize_title( $title ?: 'replicated-project' );
+
+	if ( strpos( $format, 'react' ) !== false ) {
+		// package.json
+		$pkg = array(
+			'name' => $slug,
+			'private' => true,
+			'version' => '1.0.0',
+			'type' => 'module',
+			'scripts' => array(
+				'dev' => 'vite',
+				'build' => 'tsc && vite build',
+				'preview' => 'vite preview'
+			),
+			'dependencies' => array(
+				'react' => '^18.3.1',
+				'react-dom' => '^18.3.1',
+				'lucide-react' => '^0.441.0'
+			),
+			'devDependencies' => array(
+				'@types/react' => '^18.3.5',
+				'@types/react-dom' => '^18.3.0',
+				'@vitejs/plugin-react' => '^4.3.1',
+				'typescript' => '^5.5.3',
+				'vite' => '^5.4.2'
+			)
+		);
+
+		if ( strpos( $format, 'tailwind' ) !== false ) {
+			$pkg['devDependencies']['tailwindcss'] = '^3.4.11';
+			$pkg['devDependencies']['postcss'] = '^8.4.47';
+			$pkg['devDependencies']['autoprefixer'] = '^10.4.20';
+
+			// tailwind.config.js
+			file_put_contents( $target_path . '/tailwind.config.js', "/** @type {import('tailwindcss').Config} */\nexport default {\n  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],\n  theme: { extend: {} },\n  plugins: [],\n}\n" );
+			// postcss.config.js
+			file_put_contents( $target_path . '/postcss.config.js', "export default {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n}\n" );
+			// src/index.css
+			file_put_contents( $src_dir . '/index.css', "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\nbody {\n  margin: 0;\n  font-family: system-ui, -apple-system, sans-serif;\n}\n" );
+		} else {
+			file_put_contents( $src_dir . '/index.css', "body {\n  margin: 0;\n  font-family: system-ui, -apple-system, sans-serif;\n}\n" );
+		}
+
+		file_put_contents( $target_path . '/package.json', json_encode( $pkg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) );
+
+		// vite.config.ts
+		file_put_contents( $target_path . '/vite.config.ts', "import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\n\nexport default defineConfig({\n  plugins: [react()],\n});\n" );
+
+		// tsconfig.json
+		file_put_contents( $target_path . '/tsconfig.json', "{\n  \"compilerOptions\": {\n    \"target\": \"ES2020\",\n    \"useDefineForClassFields\": true,\n    \"lib\": [\"ES2020\", \"DOM\", \"DOM.Iterable\"],\n    \"module\": \"ESNext\",\n    \"skipLibCheck\": true,\n    \"moduleResolution\": \"bundler\",\n    \"resolveJsonModule\": true,\n    \"isolatedModules\": true,\n    \"noEmit\": true,\n    \"jsx\": \"react-jsx\",\n    \"strict\": true,\n    \"noUnusedLocals\": false,\n    \"noUnusedParameters\": false\n  },\n  \"include\": [\"src\"]\n}\n" );
+
+		// tsconfig.node.json
+		file_put_contents( $target_path . '/tsconfig.node.json', "{\n  \"compilerOptions\": {\n    \"composite\": true,\n    \"skipLibCheck\": true,\n    \"module\": \"ESNext\",\n    \"moduleResolution\": \"bundler\",\n    \"allowSyntheticDefaultImports\": true\n  },\n  \"include\": [\"vite.config.ts\"]\n}\n" );
+
+		// index.html
+		file_put_contents( $target_path . '/index.html', "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <link rel=\"icon\" type=\"image/x-icon\" href=\"/favicon.ico\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>" . esc_html( $title ) . "</title>\n  </head>\n  <body>\n    <div id=\"root\"></div>\n    <script type=\"module\" src=\"/src/main.tsx\"></script>\n  </body>\n</html>\n" );
+
+		// src/main.tsx
+		file_put_contents( $src_dir . '/main.tsx', "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\nimport './index.css';\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n" );
+	}
+}
+
+/**
  * Single Component Transpiler: converts an isolated HTML/CSS slice into a clean component
  */
 function upr_server_transpile_component( $html, $css, $format, $title = 'Component' ) {
-	$gemini_key = get_option( 'upr_server_gemini_api_key', '' );
+	$gemini_key = upr_get_gemini_api_key();
 	if ( empty( $gemini_key ) ) {
-		$gemini_key = get_option( 'upr_client_gemini_api_key', '' );
-	}
-
-	if ( empty( $gemini_key ) ) {
-		return new WP_Error( 'upr_missing_gemini_key', 'Gemini API key is not configured on the server.', array( 'status' => 500 ) );
+		return new WP_Error( 'upr_missing_gemini_key', 'Gemini API key is not configured. Please define UPR_GEMINI_API_KEY in the plugin or save it in Replicator Server settings.', array( 'status' => 500 ) );
 	}
 
 	$prompt = upr_transpiler_build_component_prompt( $html, $css, $format, $title );
