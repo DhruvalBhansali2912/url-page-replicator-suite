@@ -15,7 +15,7 @@ define( 'UPR_SERVER_URL', plugin_dir_url( __FILE__ ) );
 
 // Hardcoded Gemini API Key (pre-configured for deployment)
 if ( ! defined( 'UPR_GEMINI_API_KEY' ) ) {
-	define( 'UPR_GEMINI_API_KEY', '' ); // Define here or in wp-config.php // <-- Paste your Gemini API key here
+	define( 'UPR_GEMINI_API_KEY', '' ); // <-- Paste your Gemini API key here or configure via WP Admin settings
 }
 
 // Handle CORS Preflight OPTIONS Requests early
@@ -488,7 +488,11 @@ function upr_server_handle_transpile_component( WP_REST_Request $request ) {
 		return $result;
 	}
 
-	// Consume 1 token credit (free monthly credit first)
+	if ( empty( $result['component'] ) ) {
+		return new WP_Error( 'upr_transpile_failed', 'Failed to generate valid component code.', array( 'status' => 500 ) );
+	}
+
+	// Strictly consume 1 token credit ONLY upon verified success
 	$token_row = $request->get_param( 'upr_token_row' );
 	upr_server_consume_credit( $token_row, 1 );
 
@@ -515,26 +519,39 @@ function upr_server_handle_replicate( WP_REST_Request $request ) {
 		return $package;
 	}
 
+	$upload_dir = wp_upload_dir();
+	$exports_dir = wp_normalize_path( $upload_dir['basedir'] . '/url-page-replicator-server/exports' );
+	$zip_filepath = $exports_dir . '/' . $package['compilation_id'] . '.zip';
+
 	// If a modern framework was requested (react-tailwind, react-css, angular, html-clean), transpile before re-zipping
 	if ( $format !== 'raw' && ! empty( $package['compilation_id'] ) ) {
 		require_once UPR_SERVER_PATH . 'includes/transpiler-engine.php';
-		$upload_dir = wp_upload_dir();
 		$target_path = wp_normalize_path( $upload_dir['basedir'] . '/url-page-replicator-server/' . $package['compilation_id'] );
 		
 		$transpiled = upr_server_transpile_page( $target_path, $package['compilation_id'], $format, $package['title'] ?? 'Replicated Page', $url );
-		if ( ! is_wp_error( $transpiled ) ) {
-			// Re-create the ZIP package to include generated framework files
-			$exports_dir = wp_normalize_path( $upload_dir['basedir'] . '/url-page-replicator-server/exports' );
-			$zip_filepath = $exports_dir . '/' . $package['compilation_id'] . '.zip';
-			uprs_zip_folder( $target_path, $zip_filepath );
+		if ( is_wp_error( $transpiled ) ) {
+			if ( function_exists( 'uprs_rrmdir' ) ) {
+				uprs_rrmdir( $target_path );
+			}
+			// Do NOT consume token if transpilation failed
+			return $transpiled;
 		}
+
+		// Re-create the ZIP package to include generated framework files
+		uprs_zip_folder( $target_path, $zip_filepath );
+
 		// Clean up compilation directory after zipping
 		if ( function_exists( 'uprs_rrmdir' ) ) {
 			uprs_rrmdir( $target_path );
 		}
 	}
 
-	// Consume 1 token credit on success (using monthly free credit first, then purchased)
+	// Verify ZIP file exists and is valid before consuming token
+	if ( ! file_exists( $zip_filepath ) || filesize( $zip_filepath ) < 100 ) {
+		return new WP_Error( 'upr_zip_creation_failed', 'Failed to generate project archive.', array( 'status' => 500 ) );
+	}
+
+	// Strictly consume 1 token credit ONLY on verified success
 	upr_server_consume_credit( $token_row, 1 );
 
 	return rest_ensure_response( $package );
@@ -561,21 +578,36 @@ function upr_server_handle_replicate_figma( WP_REST_Request $request ) {
 		return $package;
 	}
 
+	$upload_dir = wp_upload_dir();
+	$exports_dir = wp_normalize_path( $upload_dir['basedir'] . '/url-page-replicator-server/exports' );
+	$zip_filepath = $exports_dir . '/' . $package['compilation_id'] . '.zip';
+
 	// If framework format requested, transpile and re-zip
 	if ( $format !== 'raw' && ! empty( $package['compilation_id'] ) ) {
 		require_once UPR_SERVER_PATH . 'includes/transpiler-engine.php';
-		$upload_dir = wp_upload_dir();
 		$target_path = wp_normalize_path( $upload_dir['basedir'] . '/url-page-replicator-server/' . $package['compilation_id'] );
 		
 		$transpiled = upr_server_transpile_page( $target_path, $package['compilation_id'], $format, $package['title'] ?? 'Figma Prototype', $desktop_url );
-		if ( ! is_wp_error( $transpiled ) ) {
-			$exports_dir = wp_normalize_path( $upload_dir['basedir'] . '/url-page-replicator-server/exports' );
-			$zip_filepath = $exports_dir . '/' . $package['compilation_id'] . '.zip';
-			uprs_zip_folder( $target_path, $zip_filepath );
+		if ( is_wp_error( $transpiled ) ) {
+			if ( function_exists( 'uprs_rrmdir' ) ) {
+				uprs_rrmdir( $target_path );
+			}
+			return $transpiled;
+		}
+
+		uprs_zip_folder( $target_path, $zip_filepath );
+
+		if ( function_exists( 'uprs_rrmdir' ) ) {
+			uprs_rrmdir( $target_path );
 		}
 	}
 
-	// Consume 1 token credit on success
+	// Verify ZIP file exists before consuming token
+	if ( ! file_exists( $zip_filepath ) || filesize( $zip_filepath ) < 100 ) {
+		return new WP_Error( 'upr_figma_zip_failed', 'Failed to generate Figma project archive.', array( 'status' => 500 ) );
+	}
+
+	// Consume 1 token credit ONLY on verified success
 	upr_server_consume_credit( $token_row, 1 );
 
 	return rest_ensure_response( $package );

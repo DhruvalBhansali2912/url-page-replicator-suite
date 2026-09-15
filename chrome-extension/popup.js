@@ -95,7 +95,53 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   fetchTokenInfo();
 
-  // 5. Full Page Replication Handler
+  // Restore background replication state if process is active or recently completed
+  function restoreReplicationState(state) {
+    if (!state) return;
+
+    if (state.isReplicating) {
+      replicateBtn.disabled = true;
+      replicateBtn.querySelector('.btn-text').textContent = 'Replicating...';
+      replicateBtn.querySelector('.btn-spinner').classList.remove('hidden');
+      hideAlert();
+      showProgress(state.percent || 30, state.statusMessage || 'Replicating in background...');
+    } else if (state.completed) {
+      replicateBtn.disabled = false;
+      replicateBtn.querySelector('.btn-text').textContent = 'Generate & Download Project';
+      replicateBtn.querySelector('.btn-spinner').classList.add('hidden');
+      if (Date.now() - (state.startedAt || 0) < 180000) {
+        showProgress(100, state.statusMessage || 'Replication complete! Download started.');
+        showAlert(`Successfully generated ${state.format || 'project'}! Saved as ${state.filename || 'archive.zip'}`, 'success');
+      } else {
+        hideProgress();
+      }
+    } else if (state.error) {
+      replicateBtn.disabled = false;
+      replicateBtn.querySelector('.btn-text').textContent = 'Generate & Download Project';
+      replicateBtn.querySelector('.btn-spinner').classList.add('hidden');
+      if (Date.now() - (state.startedAt || 0) < 180000) {
+        showAlert(`Replication failed: ${state.error}`, 'error');
+      }
+      hideProgress();
+    }
+  }
+
+  // Check storage on popup open
+  chrome.storage.local.get(['replicationState'], res => {
+    restoreReplicationState(res.replicationState);
+  });
+
+  // Listen for real-time background progress changes
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.replicationState) {
+      restoreReplicationState(changes.replicationState.newValue);
+      if (changes.replicationState.newValue && changes.replicationState.newValue.completed) {
+        fetchTokenInfo();
+      }
+    }
+  });
+
+  // 5. Full Page Replication Handler (Delegated to Background Service Worker)
   replicateBtn.addEventListener('click', async () => {
     const url = pageUrlInput.value.trim();
     if (!url) {
@@ -115,55 +161,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     replicateBtn.querySelector('.btn-text').textContent = 'Replicating...';
     replicateBtn.querySelector('.btn-spinner').classList.remove('hidden');
     hideAlert();
-    showProgress(20, 'Capturing webpage and localizing assets...');
+    showProgress(20, 'Capturing webpage and localizing assets in background...');
 
-    try {
-      const endpoint = `${settings.serverUrl.replace(/\/$/, '')}/upr-server/v1/replicate`;
-      
-      showProgress(45, format !== 'raw' ? `Converting into component-based ${format}...` : 'Packaging offline assets...');
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${settings.apiToken}`
-        },
-        body: JSON.stringify({ url, format })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || `Server error ${response.status}`);
+    chrome.runtime.sendMessage({
+      action: 'start_replication',
+      url,
+      format,
+      serverUrl: settings.serverUrl,
+      apiToken: settings.apiToken
+    }, (res) => {
+      if (chrome.runtime.lastError) {
+        showAlert(`Failed to start replication: ${chrome.runtime.lastError.message}`, 'error');
+        replicateBtn.disabled = false;
+        replicateBtn.querySelector('.btn-text').textContent = 'Generate & Download Project';
+        replicateBtn.querySelector('.btn-spinner').classList.add('hidden');
+        hideProgress();
       }
-
-      showProgress(85, 'Downloading project ZIP package...');
-
-      if (data.download_url) {
-        const filename = `${data.slug || 'replicated-project'}-${format}.zip`;
-        chrome.downloads.download({
-          url: data.download_url,
-          filename: filename,
-          saveAs: true
-        });
-
-        showProgress(100, 'Replication complete! Download started.');
-        showAlert(`Successfully generated ${format} project! Saved as ${filename}`, 'success');
-        fetchTokenInfo();
-      } else {
-        throw new Error('No download URL returned by the server.');
-      }
-    } catch (err) {
-      showAlert(`Replication failed: ${err.message}`, 'error');
-      hideProgress();
-    } finally {
-      replicateBtn.disabled = false;
-      replicateBtn.querySelector('.btn-text').textContent = 'Generate & Download Project';
-      replicateBtn.querySelector('.btn-spinner').classList.add('hidden');
-    }
+    });
   });
 
-  // 6. Component Picker Activation
+  // 6. Component Picker Activation (Direct script execution)
   activatePickerBtn.addEventListener('click', async () => {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!activeTab || !activeTab.id) {
@@ -178,44 +195,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const format = componentFrameworkSelect.value;
+    const config = {
+      format: format,
+      serverUrl: settings.serverUrl,
+      apiToken: settings.apiToken
+    };
 
-    // Send activation message; if content script isn't loaded yet, inject it dynamically
     try {
-      await chrome.tabs.sendMessage(activeTab.id, {
-        action: 'activate_picker',
-        format: format,
-        serverUrl: settings.serverUrl,
-        apiToken: settings.apiToken
-      });
-      window.close();
-    } catch (msgErr) {
-      // Content script not loaded yet (e.g. tab was open before extension installed). Inject and retry:
-      try {
-        await chrome.scripting.insertCSS({
-          target: { tabId: activeTab.id },
-          files: ['content-script.css']
-        });
-        await chrome.scripting.executeScript({
-          target: { tabId: activeTab.id },
-          files: ['content-script.js']
-        });
+      // 1. Inject CSS and content-script
+      await chrome.scripting.insertCSS({
+        target: { tabId: activeTab.id },
+        files: ['content-script.css']
+      }).catch(() => {});
 
-        setTimeout(async () => {
-          try {
-            await chrome.tabs.sendMessage(activeTab.id, {
-              action: 'activate_picker',
-              format: format,
-              serverUrl: settings.serverUrl,
-              apiToken: settings.apiToken
-            });
-            window.close();
-          } catch (retryErr) {
-            showAlert('Please refresh the webpage and try Activate Component Picker again.', 'error');
+      await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        files: ['content-script.js']
+      }).catch(() => {});
+
+      // 2. Directly trigger the picker function inside the tab
+      await chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        func: (cfg) => {
+          if (typeof window.__UPR_START_PICKER__ === 'function') {
+            window.__UPR_START_PICKER__(cfg);
           }
-        }, 120);
-      } catch (injectErr) {
-        showAlert(`Could not inspect page: ${injectErr.message}`, 'error');
-      }
+        },
+        args: [config]
+      });
+
+      // Instantly close popup to let user interact directly with page
+      window.close();
+    } catch (err) {
+      console.error('Picker activation error:', err);
+      showAlert(`Could not activate element picker: ${err.message}`, 'error');
     }
   });
 

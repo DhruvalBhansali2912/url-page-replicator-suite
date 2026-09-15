@@ -45,34 +45,38 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 
 	$raw_html = file_get_contents( $html_file );
 
-	// 1. Sanitize and prepare DOM for AI processing
+	// 1. Build local media asset manifest from scraped files
+	$asset_manifest = upr_transpiler_build_asset_manifest( $target_path, $raw_html );
+
+	// 2. Sanitize and prepare DOM for AI processing
 	$sanitized = upr_transpiler_sanitize_dom( $raw_html );
 
-	// 2. Transpile components using Gemini AI
-	$project_files = upr_transpiler_call_gemini( $sanitized['html'], $sanitized['styles'], $format, $title, $gemini_key );
+	// 3. Transpile components using Gemini AI
+	$project_files = upr_transpiler_call_gemini( $sanitized['html'], $sanitized['styles'], $format, $title, $gemini_key, $asset_manifest );
 	if ( is_wp_error( $project_files ) ) {
-		$project_files = array(); // fall back to scaffolded project
+		return $project_files;
+	}
+	if ( empty( $project_files ) || ! is_array( $project_files ) ) {
+		return new WP_Error( 'upr_transpile_empty', 'AI transpiler returned no valid component files.', array( 'status' => 500 ) );
 	}
 
-	// 3. Scaffold complete runnable project structure (package.json, vite, tailwind, tsconfig, public/)
+	// 4. Scaffold complete runnable project structure (package.json, vite, tailwind, tsconfig, public/)
 	upr_transpiler_scaffold_project( $target_path, $format, $title );
 
-	// 4. Write generated project files into output directory
+	// 5. Write generated project files into output directory
 	$src_dir = $target_path . '/src';
 	if ( ! is_dir( $src_dir ) ) {
 		wp_mkdir_p( $src_dir );
 	}
 
-	if ( is_array( $project_files ) ) {
-		foreach ( $project_files as $file ) {
-			if ( empty( $file['path'] ) || empty( $file['content'] ) ) continue;
-			$file_path = wp_normalize_path( $target_path . '/' . ltrim( $file['path'], '/' ) );
-			$dir = dirname( $file_path );
-			if ( ! is_dir( $dir ) ) {
-				wp_mkdir_p( $dir );
-			}
-			file_put_contents( $file_path, $file['content'] );
+	foreach ( $project_files as $file ) {
+		if ( empty( $file['path'] ) || empty( $file['content'] ) ) continue;
+		$file_path = wp_normalize_path( $target_path . '/' . ltrim( $file['path'], '/' ) );
+		$dir = dirname( $file_path );
+		if ( ! is_dir( $dir ) ) {
+			wp_mkdir_p( $dir );
 		}
+		file_put_contents( $file_path, $file['content'] );
 	}
 
 	// Save transpilation metadata
@@ -211,67 +215,83 @@ function upr_server_transpile_component( $html, $css, $format, $title = 'Compone
 /**
  * Pre-sanitizes DOM tree to minimize token size
  */
+/**
+ * Builds local media asset manifest from scraped images
+ */
+function upr_transpiler_build_asset_manifest( $target_path, $html ) {
+	$media_exts = array( 'jpg', 'jpeg', 'png', 'gif', 'svg', 'webp' );
+	$manifest_lines = array();
+	$files = @scandir( $target_path );
+	if ( ! empty( $files ) ) {
+		foreach ( $files as $f ) {
+			if ( $f === '.' || $f === '..' || is_dir( $target_path . '/' . $f ) ) continue;
+			$ext = strtolower( pathinfo( $f, PATHINFO_EXTENSION ) );
+			if ( in_array( $ext, $media_exts, true ) ) {
+				$context = '';
+				if ( preg_match( '/<img[^>]+src=["\'][^"\']*' . preg_quote( $f, '/' ) . '["\'][^>]*alt=["\']([^"\']+)["\']/i', $html, $m ) ) {
+					$context = trim( $m[1] );
+				} elseif ( preg_match( '/alt=["\']([^"\']+)["\'][^>]*src=["\'][^"\']*' . preg_quote( $f, '/' ) . '["\']/i', $html, $m ) ) {
+					$context = trim( $m[1] );
+				}
+				if ( empty( $context ) ) {
+					$clean_name = preg_replace( '/[_-]+/', ' ', pathinfo( $f, PATHINFO_FILENAME ) );
+					$context = ucwords( trim( preg_replace( '/\s+[a-z0-9]{8,}\s*/i', ' ', $clean_name ) ) );
+				}
+				$manifest_lines[] = "- {$context}: `/{$f}`";
+			}
+		}
+	}
+	return ! empty( $manifest_lines ) ? implode( "\n", array_slice( $manifest_lines, 0, 40 ) ) : 'No local assets detected.';
+}
+
+/**
+ * Pre-sanitizes DOM tree to eliminate SVG path coordinates and tracking bloat
+ */
 function upr_transpiler_sanitize_dom( $html ) {
 	if ( empty( $html ) ) {
 		return array( 'html' => '', 'styles' => '' );
 	}
 
-	$dom = new DOMDocument();
-	libxml_use_internal_errors( true );
-	$dom->loadHTML( mb_convert_encoding( $html, 'HTML-ENTITIES', 'UTF-8' ) );
-	libxml_clear_errors();
+	// Remove scripts, noscripts, iframes, canvas, video/audio elements
+	$clean = preg_replace( '/<script\b[^>]*>(.*?)<\/script>/is', '', $html );
+	$clean = preg_replace( '/<noscript\b[^>]*>(.*?)<\/noscript>/is', '', $clean );
+	$clean = preg_replace( '/<iframe\b[^>]*>(.*?)<\/iframe>/is', '', $clean );
+	$clean = preg_replace( '/<canvas\b[^>]*>(.*?)<\/canvas>/is', '', $clean );
 
-	// Extract inline styles and style tags
+	// Extract style tags before stripping
 	$styles = '';
-	$style_tags = $dom->getElementsByTagName( 'style' );
-	for ( $i = $style_tags->length - 1; $i >= 0; $i-- ) {
-		$st = $style_tags->item( $i );
-		$styles .= "\n" . $st->nodeValue;
-		$st->parentNode->removeChild( $st );
+	if ( preg_match_all( '/<style\b[^>]*>(.*?)<\/style>/is', $clean, $style_matches ) ) {
+		$styles = implode( "\n", $style_matches[1] );
+		$clean = preg_replace( '/<style\b[^>]*>(.*?)<\/style>/is', '', $clean );
 	}
 
-	// Remove script tags, noscript, and iframe trackers
-	$remove_tags = array( 'script', 'noscript', 'iframe' );
-	foreach ( $remove_tags as $tag_name ) {
-		$nodes = $dom->getElementsByTagName( $tag_name );
-		for ( $i = $nodes->length - 1; $i >= 0; $i-- ) {
-			$node = $nodes->item( $i );
-			$node->parentNode->removeChild( $node );
-		}
-	}
+	// Strip huge SVG path coordinates and replace with lightweight icon tag
+	$clean = preg_replace( '/<svg\b[^>]*>.*?<\/svg>/is', '<svg data-icon="icon" class="w-5 h-5 inline-block"></svg>', $clean );
 
-	// Simplify SVGs to placeholder tokens to save thousands of tokens
-	$svgs = $dom->getElementsByTagName( 'svg' );
-	for ( $i = 0; $i < $svgs->length; $i++ ) {
-		$svg = $svgs->item( $i );
-		while ( $svg->hasChildNodes() ) {
-			$svg->removeChild( $svg->firstChild );
-		}
-		$svg->setAttribute( 'data-icon-placeholder', 'icon_' . ( $i + 1 ) );
-	}
+	// Strip data attributes that bloat DOM (analytics, anim, tracking, etc.)
+	$clean = preg_replace( '/\s+data-(?:analytics|anim|viewport|feature|focus|module|unit)[a-z0-9_-]*="[^"]*"/i', '', $clean );
+	$clean = preg_replace( '/\s+aria-(?:hidden|label|describedby)="[^"]*"/i', '', $clean );
+	$clean = preg_replace( '/\s+tabindex="[^"]*"/i', '', $clean );
+	$clean = preg_replace( '/\s+role="[^"]*"/i', '', $clean );
 
 	// Strip base64 data URIs
-	$xpath = new DOMXPath( $dom );
-	$data_nodes = $xpath->query( '//*[@src[starts-with(., "data:")]] | //*[@href[starts-with(., "data:")]]' );
-	foreach ( $data_nodes as $node ) {
-		if ( $node->hasAttribute( 'src' ) && strpos( $node->getAttribute( 'src' ), 'data:' ) === 0 ) {
-			$node->setAttribute( 'src', './assets/placeholder.png' );
-		}
-		if ( $node->hasAttribute( 'href' ) && strpos( $node->getAttribute( 'href' ), 'data:' ) === 0 ) {
-			$node->setAttribute( 'href', '#' );
-		}
-	}
+	$clean = preg_replace( '/src=["\']data:image\/[^;]+;base64,[^"\']+["\']/i', 'src="/placeholder.png"', $clean );
 
-	$body = $dom->getElementsByTagName( 'body' );
-	$clean_html = $body->length > 0 ? $dom->saveHTML( $body->item( 0 ) ) : $dom->saveHTML();
+	// Clean up extra whitespace and empty tags
+	$clean = preg_replace( '/\n\s*\n/', "\n", $clean );
 
-	// Truncate style string to key classes and properties (keep under 20k chars)
+	// Limit styles to key rules (up to 20k chars)
 	if ( strlen( $styles ) > 20000 ) {
 		$styles = substr( $styles, 0, 20000 ) . "\n/* ... styles truncated for brevity ... */";
 	}
 
+	// Keep up to 120k chars of clean HTML so Gemini sees the entire page (heroes, promos, footer)
+	if ( strlen( $clean ) > 120000 ) {
+		$clean = substr( $clean, 0, 120000 );
+	}
+
 	return array(
-		'html'   => $clean_html,
+		'html'   => $clean,
 		'styles' => $styles
 	);
 }
@@ -324,9 +344,9 @@ Instructions:
 }
 
 /**
- * Calls Gemini to generate the full project structure
+ * Calls Gemini to generate the full project structure with high-fidelity styling & real assets
  */
-function upr_transpiler_call_gemini( $html, $styles, $format, $title, $api_key ) {
+function upr_transpiler_call_gemini( $html, $styles, $format, $title, $api_key, $asset_manifest = '' ) {
 	$is_react = strpos( $format, 'react' ) !== false;
 	$is_tailwind = strpos( $format, 'tailwind' ) !== false;
 	$is_angular = ( $format === 'angular' );
@@ -337,18 +357,36 @@ function upr_transpiler_call_gemini( $html, $styles, $format, $title, $api_key )
 	if ( $format === 'html-clean' ) $format_desc = 'Clean Semantic HTML5 with BEM CSS';
 
 	$ext = $is_react ? 'tsx' : ( $is_angular ? 'ts' : 'html' );
-	$prompt = "You are a Principal Frontend Architect. Convert this captured webpage DOM and styles into clean, modular, production-grade {$format_desc} components.
+	$prompt = "You are a World-Class Frontend Architect specializing in Pixel-Perfect Design Replication. Convert this captured webpage DOM, styles, and local media assets into clean, production-grade {$format_desc} components.
 
-Rules:
-1. Do NOT output configuration files (NO package.json, NO vite.config.ts, NO tsconfig.json, NO index.html). They are already generated.
-2. Output ONLY the UI components under 'src/':
-   - src/App.{$ext} (default export App, assembling components)
-   - src/components/Navbar.{$ext}
-   - src/components/Hero.{$ext}
-   - src/components/Card.{$ext}
-   - src/components/Footer.{$ext}
-3. Decompose repeating items (cards, nav links, footer links) into data arrays with props.
-4. Output each file inside a markdown code block with '// FILE: path' on the first line comment:
+AVAILABLE LOCAL ASSETS (Stored in public/ - Reference directly with leading slash):
+{$asset_manifest}
+
+CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES:
+1. REAL LOCAL IMAGES:
+   - You MUST use the exact file paths from 'AVAILABLE LOCAL ASSETS' above in your `img src` tags (e.g. `src=\"/hero_iphone16pro_avail...large.jpg\"`).
+   - NEVER hallucinate external stock photo URLs or leave tiny empty boxes.
+2. HERO SECTIONS (FULL-BLEED & IMPACTFUL):
+   - Hero container MUST be full width with generous vertical height: `w-full min-h-[580px] lg:min-h-[660px] flex flex-col items-center justify-between text-center relative overflow-hidden py-12 px-4`.
+   - Hero Product Images MUST NOT BE TINY THUMBNAILS: Use `w-full max-w-[850px] lg:max-w-[1050px] object-contain mx-auto mt-6` so the product commands the viewport just like Apple's official showcase.
+   - Typography: Bold headline (`text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight`), subheadline (`text-xl sm:text-2xl mt-2 text-neutral-300 font-normal`), and pill CTAs (`bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 py-2 text-sm font-medium`, `border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white rounded-full px-5 py-2 text-sm font-medium transition-colors`).
+3. PROMO CARDS (GRID):
+   - 2-column responsive grid on desktop: `grid grid-cols-1 md:grid-cols-2 gap-4 max-w-[1280px] mx-auto px-4 my-4`.
+   - Card container: `min-h-[500px] flex flex-col items-center justify-between p-8 rounded-3xl overflow-hidden text-center relative bg-[#f5f5f7] text-neutral-900`.
+   - Card product image: `w-full max-w-[400px] object-contain mt-6`.
+4. MOBILE NAVIGATION (FULL-SCREEN DRAWER):
+   - In Navbar.tsx, implement a mobile drawer with `useState(false)` and hamburger toggle icons (`Menu` and `X` from 'lucide-react').
+   - When opened on mobile, it MUST NOT be a tiny cramped box. It MUST be a full-screen drawer: `fixed inset-x-0 top-12 bottom-0 bg-neutral-950/95 backdrop-blur-2xl z-50 flex flex-col px-8 py-8 space-y-4 overflow-y-auto`.
+   - Links inside mobile drawer: `text-2xl font-semibold text-neutral-200 hover:text-white transition-colors border-b border-neutral-800/80 pb-3 block`.
+5. OUTPUT STRUCTURE:
+   - Output ONLY the UI components under 'src/':
+     * src/App.{$ext} (default export App, assembling components)
+     * src/components/Navbar.{$ext}
+     * src/components/Hero.{$ext}
+     * src/components/PromoGrid.{$ext}
+     * src/components/Footer.{$ext}
+   - Do NOT output config files (NO package.json, vite.config, tsconfig, or index.html).
+   - Output each file inside a markdown code block with '// FILE: path' on the very first line comment:
 
 ```{$ext}
 // FILE: src/components/Navbar.{$ext}
@@ -361,18 +399,23 @@ Rules:
 ```
 
 ```{$ext}
+// FILE: src/components/PromoGrid.{$ext}
+[code here]
+```
+
+```{$ext}
 // FILE: src/App.{$ext}
 [code here]
 ```
 
 Captured HTML:
 ```html
-" . substr( $html, 0, 30000 ) . "
+{$html}
 ```
 
 Extracted Styles:
 ```css
-" . substr( $styles, 0, 15000 ) . "
+{$styles}
 ```
 
 Output ONLY the codeblocks with // FILE: path comments.";
@@ -415,10 +458,11 @@ Output ONLY the codeblocks with // FILE: path comments.";
  */
 function upr_transpiler_query_gemini( $prompt, $api_key, $json_mode = false ) {
 	$candidate_models = array(
+		'gemini-2.5-flash',
 		'gemini-flash-latest',
+		'gemini-2.0-flash',
 		'gemini-3.5-flash',
-		'gemini-3-flash-preview',
-		'gemini-3.5-flash-lite'
+		'gemini-1.5-flash'
 	);
 
 	$last_error = 'Gemini API call failed';
@@ -445,7 +489,7 @@ function upr_transpiler_query_gemini( $prompt, $api_key, $json_mode = false ) {
 		}
 
 		$response = wp_remote_post( $endpoint, array(
-			'timeout' => 120,
+			'timeout' => 180,
 			'headers' => array( 'Content-Type' => 'application/json' ),
 			'body'    => json_encode( $body_data )
 		) );

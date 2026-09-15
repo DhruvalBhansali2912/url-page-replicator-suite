@@ -16,7 +16,21 @@
     apiToken: ''
   };
 
-  // Listen for messages from popup
+  // Expose global entrypoints for bulletproof direct execution
+  window.__UPR_START_PICKER__ = function(config) {
+    if (config) {
+      if (config.format) pickerConfig.format = config.format;
+      if (config.serverUrl) pickerConfig.serverUrl = config.serverUrl;
+      if (config.apiToken) pickerConfig.apiToken = config.apiToken;
+    }
+    startPicker();
+  };
+
+  window.__UPR_STOP_PICKER__ = function() {
+    stopPicker();
+  };
+
+  // Listen for messages from popup (backward compatibility)
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'activate_picker') {
       pickerConfig.format = request.format || 'react-tailwind';
