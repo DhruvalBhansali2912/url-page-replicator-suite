@@ -219,11 +219,16 @@ function upr_server_handle_credits_info( WP_REST_Request $request ) {
 // Token Validation Permission Callback
 function upr_server_validate_token( WP_REST_Request $request ) {
 	$auth_header = $request->get_header( 'Authorization' );
-	if ( empty( $auth_header ) || ! preg_match( '/Bearer\s+(.+)/i', $auth_header, $matches ) ) {
-		return new WP_Error( 'upr_unauthorized', 'Missing or malformed Authorization header.', array( 'status' => 401 ) );
+	$token = '';
+	if ( ! empty( $auth_header ) && preg_match( '/Bearer\s+(.+)/i', $auth_header, $matches ) ) {
+		$token = sanitize_text_field( $matches[1] );
+	} elseif ( ! empty( $request->get_param( 'token' ) ) ) {
+		$token = sanitize_text_field( $request->get_param( 'token' ) );
 	}
 
-	$token = sanitize_text_field( $matches[1] );
+	if ( empty( $token ) ) {
+		return new WP_Error( 'upr_unauthorized', 'Missing or malformed Authorization header or token.', array( 'status' => 401 ) );
+	}
 	global $wpdb;
 	$table_name = $wpdb->prefix . 'upr_server_tokens';
 	$row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $table_name WHERE token = %s AND status = 'active'", $token ) );
