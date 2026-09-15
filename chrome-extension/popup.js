@@ -95,9 +95,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   fetchTokenInfo();
 
+  const resetStatusBtn = document.getElementById('reset-status-btn');
+  const directDownloadContainer = document.getElementById('direct-download-container');
+  const directDownloadLink = document.getElementById('direct-download-link');
+
   // Restore background replication state if process is active or recently completed
   function restoreReplicationState(state) {
-    if (!state) return;
+    if (!state) {
+      hideProgress();
+      if (directDownloadContainer) directDownloadContainer.classList.add('hidden');
+      return;
+    }
+
+    const elapsed = Date.now() - (state.startedAt || 0);
+
+    // Auto-timeout if stuck for more than 3 minutes (180,000 ms)
+    if (state.isReplicating && elapsed > 180000) {
+      chrome.storage.local.remove('replicationState');
+      replicateBtn.disabled = false;
+      replicateBtn.querySelector('.btn-text').textContent = 'Generate & Download Project';
+      replicateBtn.querySelector('.btn-spinner').classList.add('hidden');
+      hideProgress();
+      if (directDownloadContainer) directDownloadContainer.classList.add('hidden');
+      showAlert('Previous task timed out after 3 minutes. State has been reset.', 'error');
+      return;
+    }
 
     if (state.isReplicating) {
       replicateBtn.disabled = true;
@@ -105,25 +127,47 @@ document.addEventListener('DOMContentLoaded', async () => {
       replicateBtn.querySelector('.btn-spinner').classList.remove('hidden');
       hideAlert();
       showProgress(state.percent || 30, state.statusMessage || 'Replicating in background...');
+      if (directDownloadContainer) directDownloadContainer.classList.add('hidden');
     } else if (state.completed) {
       replicateBtn.disabled = false;
       replicateBtn.querySelector('.btn-text').textContent = 'Generate & Download Project';
       replicateBtn.querySelector('.btn-spinner').classList.add('hidden');
-      if (Date.now() - (state.startedAt || 0) < 180000) {
-        showProgress(100, state.statusMessage || 'Replication complete! Download started.');
+
+      if (elapsed < 300000) {
+        showProgress(100, state.statusMessage || 'Replication complete!');
         showAlert(`Successfully generated ${state.format || 'project'}! Saved as ${state.filename || 'archive.zip'}`, 'success');
+        if (state.downloadUrl && directDownloadContainer && directDownloadLink) {
+          directDownloadContainer.classList.remove('hidden');
+          directDownloadLink.href = state.downloadUrl;
+          directDownloadLink.setAttribute('download', state.filename || 'project.zip');
+        }
       } else {
         hideProgress();
+        if (directDownloadContainer) directDownloadContainer.classList.add('hidden');
       }
     } else if (state.error) {
       replicateBtn.disabled = false;
       replicateBtn.querySelector('.btn-text').textContent = 'Generate & Download Project';
       replicateBtn.querySelector('.btn-spinner').classList.add('hidden');
-      if (Date.now() - (state.startedAt || 0) < 180000) {
+      if (elapsed < 300000) {
         showAlert(`Replication failed: ${state.error}`, 'error');
       }
       hideProgress();
+      if (directDownloadContainer) directDownloadContainer.classList.add('hidden');
     }
+  }
+
+  // Bind Reset button
+  if (resetStatusBtn) {
+    resetStatusBtn.addEventListener('click', () => {
+      chrome.storage.local.remove('replicationState');
+      replicateBtn.disabled = false;
+      replicateBtn.querySelector('.btn-text').textContent = 'Generate & Download Project';
+      replicateBtn.querySelector('.btn-spinner').classList.add('hidden');
+      hideProgress();
+      if (directDownloadContainer) directDownloadContainer.classList.add('hidden');
+      showAlert('State reset. Ready to replicate.', 'success');
+    });
   }
 
   // Check storage on popup open

@@ -74,6 +74,11 @@ async function handleReplication(data) {
     });
   }, 10000);
 
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => {
+    controller.abort();
+  }, 180000); // 3-minute hard timeout
+
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -81,11 +86,13 @@ async function handleReplication(data) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiToken}`
       },
-      body: JSON.stringify({ url, format })
+      body: JSON.stringify({ url, format }),
+      signal: controller.signal
     });
 
     clearTimeout(timer1);
     clearTimeout(timer2);
+    clearTimeout(abortTimer);
 
     const resData = await response.json();
 
@@ -99,19 +106,23 @@ async function handleReplication(data) {
 
     const filename = `${resData.slug || 'replicated-project'}-${format}.zip`;
 
-    // Automatically trigger file download
-    chrome.downloads.download({
-      url: resData.download_url,
-      filename: filename,
-      saveAs: true
-    });
+    // Attempt automatic browser download (ignore dialog cancel/block errors)
+    try {
+      chrome.downloads.download({
+        url: resData.download_url,
+        filename: filename,
+        saveAs: true
+      });
+    } catch (dlErr) {
+      console.warn('Direct download prompt warning:', dlErr);
+    }
 
     await chrome.storage.local.set({
       replicationState: {
         isReplicating: false,
         completed: true,
         percent: 100,
-        statusMessage: 'Replication complete! Download started.',
+        statusMessage: 'Replication complete! Download ready.',
         downloadUrl: resData.download_url,
         filename: filename,
         format: format,
@@ -122,7 +133,13 @@ async function handleReplication(data) {
   } catch (err) {
     clearTimeout(timer1);
     clearTimeout(timer2);
-    console.error('Background replication error:', err);
+    clearTimeout(abortTimer);
+
+    const errMsg = err.name === 'AbortError' 
+      ? 'Replication timed out after 3 minutes. Please verify server status and retry.' 
+      : err.message;
+
+    console.error('Background replication error:', errMsg);
 
     await chrome.storage.local.set({
       replicationState: {
@@ -130,7 +147,7 @@ async function handleReplication(data) {
         completed: false,
         percent: 0,
         statusMessage: '',
-        error: err.message,
+        error: errMsg,
         startedAt: Date.now()
       }
     });

@@ -100,7 +100,13 @@
       <div class="progress-bar">
         <div id="progress-bar-fill" class="progress-fill"></div>
       </div>
-      <p id="status-message" class="status-msg">Starting replication...</p>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+        <p id="status-message" class="status-msg" style="margin: 0; font-size: 11px;">Starting replication...</p>
+        <button id="reset-status-btn" type="button" style="background: none; border: 1px solid #ef444466; color: #ef4444; border-radius: 4px; font-size: 10px; cursor: pointer; padding: 2px 6px;">Reset</button>
+      </div>
+      <div id="direct-download-container" class="hidden" style="margin-top: 10px;">
+        <a id="direct-download-link" href="#" class="primary-btn" style="display: block; text-align: center; text-decoration: none; padding: 8px; font-size: 12px; background: #059669;">⬇ Download Project ZIP</a>
+      </div>
     </div>
 
     <!-- Feedback Message Container -->
