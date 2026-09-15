@@ -287,7 +287,7 @@ Return ONLY the valid JSON object.";
  * Sends request to Google Gemini REST API
  */
 function upr_transpiler_query_gemini( $prompt, $api_key, $json_mode = false ) {
-	$model = 'gemini-1.5-flash';
+	$model = 'gemini-flash-latest';
 	$endpoint = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$api_key}";
 
 	$body_data = array(

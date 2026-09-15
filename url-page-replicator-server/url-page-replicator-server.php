@@ -13,6 +13,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 define( 'UPR_SERVER_PATH', plugin_dir_path( __FILE__ ) );
 define( 'UPR_SERVER_URL', plugin_dir_url( __FILE__ ) );
 
+// Hardcoded Gemini API Key (can be set here or in wp-config.php)
+if ( ! defined( 'UPR_GEMINI_API_KEY' ) ) {
+	define( 'UPR_GEMINI_API_KEY', '' ); // Paste your Gemini API key here or define in wp-config.php
+}
+
 // Handle CORS Preflight OPTIONS Requests early
 add_action( 'init', 'upr_server_handle_cors_preflight' );
 function upr_server_handle_cors_preflight() {
