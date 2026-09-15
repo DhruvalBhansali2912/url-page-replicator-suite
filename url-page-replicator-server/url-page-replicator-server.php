@@ -309,7 +309,7 @@ function upr_server_render_dashboard() {
 	// Handle Gemini & Figma Settings save
 	if ( isset( $_POST['upr_save_server_settings'] ) && check_admin_referer( 'upr_save_server_settings_action', 'upr_save_server_settings_nonce' ) ) {
 		$figma_token = sanitize_text_field( $_POST['figma_token'] );
-		$gemini_key  = sanitize_text_field( $_POST['gemini_api_key'] );
+		$gemini_key  = sanitize_textarea_field( $_POST['gemini_api_key'] );
 		update_option( 'upr_server_figma_token', $figma_token );
 		update_option( 'upr_server_gemini_api_key', $gemini_key );
 		echo '<div class="notice notice-success is-dismissible"><p>Server settings saved successfully!</p></div>';
@@ -360,10 +360,10 @@ function upr_server_render_dashboard() {
 					<?php wp_nonce_field( 'upr_save_server_settings_action', 'upr_save_server_settings_nonce' ); ?>
 					<table class="form-table">
 						<tr>
-							<th><label for="gemini_api_key">Google Gemini API Key</label></th>
+							<th><label for="gemini_api_key">Google Gemini API Keys<br><span style="font-size: 11px; font-weight: normal; color: #64748b;">(Multi-Account Rotation Pool)</span></label></th>
 							<td>
-								<input type="password" name="gemini_api_key" id="gemini_api_key" value="<?php echo esc_attr( $gemini_key ); ?>" placeholder="AIzaSy..." class="regular-text" style="width: 100%;" />
-								<p class="description">Required for Layer 2 AI code generation (React, Angular, Clean HTML). <a href="https://aistudio.google.com/" target="_blank">Get Free Gemini API Key &rarr;</a></p>
+								<textarea name="gemini_api_key" id="gemini_api_key" rows="4" style="width: 100%; font-family: monospace; font-size: 12px;" placeholder="Paste 1 or multiple Gemini API keys (one per line or comma-separated)&#10;AIzaSy...&#10;AIzaSy..."><?php echo esc_textarea( $gemini_key ); ?></textarea>
+								<p class="description"><strong>Multi-Account Key Pool:</strong> Paste keys from 4–5 Google accounts (one per line). The server automatically rotates across keys and models (Gemini 3.6 Flash, 3.5 Flash, 3.7 Flash, 3.8 Flash, 3.5 Flash Lite, 3.1 Flash Lite) to bypass rate limits and multiply your free daily generations! <a href="https://aistudio.google.com/" target="_blank">Get Free Gemini API Keys &rarr;</a></p>
 							</td>
 						</tr>
 						<tr>

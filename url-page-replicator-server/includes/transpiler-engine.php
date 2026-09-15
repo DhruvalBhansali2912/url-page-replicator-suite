@@ -12,21 +12,61 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Resolves Gemini API key with priority:
  * 1. Hardcoded PHP constant UPR_GEMINI_API_KEY
  * 2. Environment variable GEMINI_API_KEY
- * 3. WordPress options (upr_server_gemini_api_key)
+/**
+ * Resolves all Gemini API keys for multi-account pool rotation.
+ * Supports multiple keys separated by newlines, commas, or semicolons.
  */
-function upr_get_gemini_api_key() {
+function upr_get_gemini_api_keys() {
+	$raw_keys = array();
+
+	if ( defined( 'UPR_GEMINI_API_KEYS' ) && ! empty( UPR_GEMINI_API_KEYS ) ) {
+		$raw_keys[] = UPR_GEMINI_API_KEYS;
+	}
 	if ( defined( 'UPR_GEMINI_API_KEY' ) && ! empty( UPR_GEMINI_API_KEY ) ) {
-		return UPR_GEMINI_API_KEY;
+		$raw_keys[] = UPR_GEMINI_API_KEY;
 	}
 	$env = getenv( 'GEMINI_API_KEY' );
 	if ( ! empty( $env ) ) {
-		return $env;
+		$raw_keys[] = $env;
 	}
 	$server_opt = get_option( 'upr_server_gemini_api_key', '' );
 	if ( ! empty( $server_opt ) ) {
-		return $server_opt;
+		$raw_keys[] = $server_opt;
 	}
-	return get_option( 'upr_client_gemini_api_key', '' );
+	$client_opt = get_option( 'upr_client_gemini_api_key', '' );
+	if ( ! empty( $client_opt ) ) {
+		$raw_keys[] = $client_opt;
+	}
+
+	$all_keys = array();
+	foreach ( $raw_keys as $item ) {
+		if ( is_array( $item ) ) {
+			foreach ( $item as $k ) {
+				$k = trim( $k );
+				if ( ! empty( $k ) && ! in_array( $k, $all_keys, true ) ) {
+					$all_keys[] = $k;
+				}
+			}
+		} elseif ( is_string( $item ) ) {
+			$parts = preg_split( '/[\r\n,;]+/', $item );
+			foreach ( $parts as $p ) {
+				$p = trim( $p );
+				if ( ! empty( $p ) && ! in_array( $p, $all_keys, true ) ) {
+					$all_keys[] = $p;
+				}
+			}
+		}
+	}
+
+	return $all_keys;
+}
+
+/**
+ * Returns primary Gemini API key (for single-key contexts)
+ */
+function upr_get_gemini_api_key() {
+	$keys = upr_get_gemini_api_keys();
+	return ! empty( $keys ) ? $keys[0] : '';
 }
 
 /**
@@ -38,8 +78,8 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 		return new WP_Error( 'upr_missing_html', 'Target index.html not found for transpilation.', array( 'status' => 404 ) );
 	}
 
-	$gemini_key = upr_get_gemini_api_key();
-	if ( empty( $gemini_key ) ) {
+	$gemini_keys = upr_get_gemini_api_keys();
+	if ( empty( $gemini_keys ) ) {
 		return new WP_Error( 'upr_missing_gemini_key', 'Gemini API key is not configured. Please define UPR_GEMINI_API_KEY in the plugin or save it in Replicator Server settings.', array( 'status' => 500 ) );
 	}
 
@@ -51,8 +91,8 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 	// 2. Sanitize and prepare DOM for AI processing
 	$sanitized = upr_transpiler_sanitize_dom( $raw_html );
 
-	// 3. Transpile components using Gemini AI
-	$project_files = upr_transpiler_call_gemini( $sanitized['html'], $sanitized['styles'], $format, $title, $gemini_key, $asset_manifest );
+	// 3. Transpile components using Gemini AI with multi-account key pool
+	$project_files = upr_transpiler_call_gemini( $sanitized['html'], $sanitized['styles'], $format, $title, $gemini_keys, $asset_manifest );
 	if ( is_wp_error( $project_files ) ) {
 		return $project_files;
 	}
@@ -454,60 +494,99 @@ Output ONLY the codeblocks with // FILE: path comments.";
 }
 
 /**
- * Sends request to Google Gemini REST API
+ * Sends request to Google Gemini REST API with Multi-Key Pool & Model Failover
  */
-function upr_transpiler_query_gemini( $prompt, $api_key, $json_mode = false ) {
+function upr_transpiler_query_gemini( $prompt, $api_keys = null, $json_mode = false ) {
+	if ( empty( $api_keys ) ) {
+		$api_keys = upr_get_gemini_api_keys();
+	} elseif ( is_string( $api_keys ) ) {
+		$api_keys = preg_split( '/[\r\n,;]+/', $api_keys );
+		$api_keys = array_filter( array_map( 'trim', $api_keys ) );
+	}
+
+	if ( empty( $api_keys ) ) {
+		return new WP_Error( 'upr_missing_gemini_key', 'No Gemini API keys configured. Please add an API key in settings.', array( 'status' => 500 ) );
+	}
+
+	// Models ordered by quality, speed, and active availability
 	$candidate_models = array(
-		'gemini-2.5-flash',
-		'gemini-flash-latest',
-		'gemini-2.0-flash',
+		'gemini-3.6-flash',
 		'gemini-3.5-flash',
-		'gemini-1.5-flash'
+		'gemini-3.7-flash',
+		'gemini-3.8-flash',
+		'gemini-3.5-flash-lite',
+		'gemini-3.1-flash-lite',
+		'gemini-flash-lite-latest',
+		'gemini-flash-latest'
 	);
 
 	$last_error = 'Gemini API call failed';
 
-	foreach ( $candidate_models as $model ) {
-		$endpoint = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$api_key}";
+	// Shuffle keys array so traffic is distributed evenly across Google accounts
+	$pool = array_values( $api_keys );
+	if ( count( $pool ) > 1 ) {
+		shuffle( $pool );
+	}
 
-		$body_data = array(
-			'contents' => array(
-				array(
-					'parts' => array(
-						array( 'text' => $prompt )
+	foreach ( $pool as $current_key ) {
+		$key_quota_exhausted = false;
+
+		foreach ( $candidate_models as $model ) {
+			if ( $key_quota_exhausted ) {
+				break;
+			}
+
+			$endpoint = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$current_key}";
+
+			$body_data = array(
+				'contents' => array(
+					array(
+						'parts' => array(
+							array( 'text' => $prompt )
+						)
 					)
+				),
+				'generationConfig' => array(
+					'temperature'     => 0.2,
+					'maxOutputTokens' => 32768
 				)
-			),
-			'generationConfig' => array(
-				'temperature'     => 0.2,
-				'maxOutputTokens' => 32768
-			)
-		);
+			);
 
-		if ( $json_mode ) {
-			$body_data['generationConfig']['responseMimeType'] = 'application/json';
+			if ( $json_mode ) {
+				$body_data['generationConfig']['responseMimeType'] = 'application/json';
+			}
+
+			$response = wp_remote_post( $endpoint, array(
+				'timeout' => 180,
+				'headers' => array( 'Content-Type' => 'application/json' ),
+				'body'    => json_encode( $body_data )
+			) );
+
+			if ( is_wp_error( $response ) ) {
+				$last_error = $response->get_error_message();
+				continue;
+			}
+
+			$status = wp_remote_retrieve_response_code( $response );
+			$body   = wp_remote_retrieve_body( $response );
+			$data   = json_decode( $body, true );
+
+			if ( $status === 200 && isset( $data['candidates'][0]['content']['parts'][0]['text'] ) ) {
+				return $data['candidates'][0]['content']['parts'][0]['text'];
+			}
+
+			$error_message = $data['error']['message'] ?? ( 'Model ' . $model . ' returned HTTP ' . $status );
+			$last_error = $error_message;
+
+			// Check for rate limit or quota exhaustion (HTTP 429)
+			if ( $status === 429 || stripos( $error_message, 'quota' ) !== false || stripos( $error_message, 'rate limit' ) !== false || stripos( $error_message, 'resource has been exhausted' ) !== false ) {
+				error_log( "[UPR Replicator] Key ... hit rate limit ({$error_message}). Automatically rotating to next account key in pool." );
+				$key_quota_exhausted = true; // rotate to next key in pool
+				break;
+			}
+
+			// If model is 503 (high demand) or 404 (deprecated), continue to next model with current key
 		}
-
-		$response = wp_remote_post( $endpoint, array(
-			'timeout' => 180,
-			'headers' => array( 'Content-Type' => 'application/json' ),
-			'body'    => json_encode( $body_data )
-		) );
-
-		if ( is_wp_error( $response ) ) {
-			$last_error = $response->get_error_message();
-			continue;
-		}
-
-		$status = wp_remote_retrieve_response_code( $response );
-		$body   = wp_remote_retrieve_body( $response );
-		$data   = json_decode( $body, true );
-
-		if ( $status === 200 && isset( $data['candidates'][0]['content']['parts'][0]['text'] ) ) {
-			return $data['candidates'][0]['content']['parts'][0]['text'];
-		}
-
-		$last_error = $data['error']['message'] ?? ( 'Model ' . $model . ' failed with status ' . $status );
 	}
 
 	return new WP_Error( 'upr_gemini_error', $last_error, array( 'status' => 500 ) );
