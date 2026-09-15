@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>InventKid Replicator Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="settings-container">
+    <header class="settings-header">
+      <div class="logo">⚡</div>
+      <div>
+        <h1>InventKid Replicator Settings</h1>
+        <p class="subtitle">Configure your server endpoint, token credentials, and renewal links.</p>
+      </div>
+    </header>
+
+    <div class="card">
+      <h2>API Credentials</h2>
+
+      <div class="form-group">
+        <label for="server-url">Replicator Server REST API Endpoint</label>
+        <input type="url" id="server-url" placeholder="http://localhost/test/wp-json" required />
+        <p class="help-text">The WordPress REST API URL where <code>url-page-replicator-server</code> is installed.</p>
+      </div>
+
+      <div class="form-group">
+        <label for="api-token">User API Token</label>
+        <input type="text" id="api-token" placeholder="Paste your 48-character API token" required />
+        <p class="help-text">Generated from the Replicator Server Dashboard or purchased via inventkid.com.</p>
+      </div>
+
+      <div class="form-group">
+        <label for="renewal-url">Token Renewal / Purchase URL</label>
+        <input type="url" id="renewal-url" placeholder="https://inventkid.com/pricing" required />
+        <p class="help-text">Where users can purchase more token credits when their monthly 3 free credits run low.</p>
+      </div>
+
+      <div class="actions">
+        <button id="save-btn" class="btn primary">Save Settings</button>
+        <button id="test-btn" class="btn secondary">Test Connection</button>
+      </div>
+
+      <div id="status-alert" class="alert hidden"></div>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

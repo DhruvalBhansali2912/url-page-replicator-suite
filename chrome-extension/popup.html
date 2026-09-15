@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>InventKid Replicator</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-group">
+        <div class="logo-icon">⚡</div>
+        <div>
+          <h1 class="title">InventKid</h1>
+          <span class="subtitle">Page & Component Replicator</span>
+        </div>
+      </div>
+      <button id="open-settings" class="icon-button" title="Settings">⚙️</button>
+    </header>
+
+    <!-- Token Balance Card -->
+    <div class="token-card" id="token-card">
+      <div class="token-header">
+        <span class="token-label">Available Tokens</span>
+        <span class="token-count" id="total-tokens">--</span>
+      </div>
+      <div class="token-details" id="token-details">
+        <span>⚡ <strong id="free-tokens">3</strong> Monthly Free</span>
+        <span class="separator">&bull;</span>
+        <span>💎 <strong id="purchased-tokens">0</strong> Purchased</span>
+      </div>
+      <div class="token-action">
+        <a href="#" id="renew-link" target="_blank" class="renew-btn">
+          <span>Renew / Buy Tokens on inventkid.com</span>
+          <span>&rarr;</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- Mode Selector Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="full-page">🌐 Full Page</button>
+      <button class="tab-btn" data-tab="component-picker">🎯 Pick Component</button>
+    </div>
+
+    <!-- Tab 1: Full Page Mode -->
+    <div class="tab-content active" id="tab-full-page">
+      <div class="form-group">
+        <label for="page-url">Page URL</label>
+        <div class="input-with-button">
+          <input type="url" id="page-url" placeholder="https://example.com" required />
+          <button id="use-current-tab" class="secondary-btn" title="Detect Current Tab">Current</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="framework-select">Target Code Output</label>
+        <select id="framework-select">
+          <option value="react-tailwind" selected>React + Tailwind CSS</option>
+          <option value="react-css">React + CSS Modules</option>
+          <option value="angular">Angular 17+ (Standalone)</option>
+          <option value="html-clean">Clean Semantic HTML5 + BEM CSS</option>
+          <option value="raw">Raw Offline Webpage Clone</option>
+        </select>
+        <p class="field-hint">Generates a modular, component-based project ZIP.</p>
+      </div>
+
+      <button id="replicate-btn" class="primary-btn">
+        <span class="btn-text">Generate & Download Project</span>
+        <span class="btn-spinner hidden"></span>
+      </button>
+    </div>
+
+    <!-- Tab 2: Component Picker Mode -->
+    <div class="tab-content" id="tab-component-picker">
+      <div class="picker-info">
+        <div class="picker-icon">👆</div>
+        <p>Hover and click on any section of the live page (Navbar, Hero, Card, Grid) to isolate its HTML and CSS.</p>
+      </div>
+
+      <div class="form-group">
+        <label for="component-framework-select">Component Output</label>
+        <select id="component-framework-select">
+          <option value="react-tailwind" selected>React Component (Tailwind)</option>
+          <option value="react-css">React Component (Scoped CSS)</option>
+          <option value="angular">Angular Component (Standalone)</option>
+          <option value="html-clean">Clean HTML / CSS</option>
+        </select>
+      </div>
+
+      <button id="activate-picker-btn" class="primary-btn accent">
+        <span>🎯 Launch Element Picker</span>
+      </button>
+    </div>
+
+    <!-- Progress / Status Container -->
+    <div id="status-box" class="status-box hidden">
+      <div class="progress-bar">
+        <div id="progress-bar-fill" class="progress-fill"></div>
+      </div>
+      <p id="status-message" class="status-msg">Starting replication...</p>
+    </div>
+
+    <!-- Feedback Message Container -->
+    <div id="alert-box" class="alert-box hidden"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
