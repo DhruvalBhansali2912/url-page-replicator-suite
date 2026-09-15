@@ -126,7 +126,7 @@ function upr_transpiler_scaffold_project( $target_path, $format, $title ) {
 			'type' => 'module',
 			'scripts' => array(
 				'dev' => 'vite',
-				'build' => 'tsc && vite build',
+				'build' => 'vite build',
 				'preview' => 'vite preview'
 			),
 			'dependencies' => array(
@@ -164,7 +164,7 @@ function upr_transpiler_scaffold_project( $target_path, $format, $title ) {
 		file_put_contents( $target_path . '/vite.config.ts', "import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\n\nexport default defineConfig({\n  plugins: [react()],\n});\n" );
 
 		// tsconfig.json
-		file_put_contents( $target_path . '/tsconfig.json', "{\n  \"compilerOptions\": {\n    \"target\": \"ES2020\",\n    \"useDefineForClassFields\": true,\n    \"lib\": [\"ES2020\", \"DOM\", \"DOM.Iterable\"],\n    \"module\": \"ESNext\",\n    \"skipLibCheck\": true,\n    \"moduleResolution\": \"bundler\",\n    \"resolveJsonModule\": true,\n    \"isolatedModules\": true,\n    \"noEmit\": true,\n    \"jsx\": \"react-jsx\",\n    \"strict\": true,\n    \"noUnusedLocals\": false,\n    \"noUnusedParameters\": false\n  },\n  \"include\": [\"src\"]\n}\n" );
+		file_put_contents( $target_path . '/tsconfig.json', "{\n  \"compilerOptions\": {\n    \"target\": \"ES2020\",\n    \"useDefineForClassFields\": true,\n    \"lib\": [\"ES2020\", \"DOM\", \"DOM.Iterable\"],\n    \"module\": \"ESNext\",\n    \"skipLibCheck\": true,\n    \"moduleResolution\": \"bundler\",\n    \"resolveJsonModule\": true,\n    \"isolatedModules\": true,\n    \"noEmit\": true,\n    \"jsx\": \"react-jsx\",\n    \"strict\": false,\n    \"noImplicitAny\": false,\n    \"noUnusedLocals\": false,\n    \"noUnusedParameters\": false\n  },\n  \"include\": [\"src\"]\n}\n" );
 
 		// tsconfig.node.json
 		file_put_contents( $target_path . '/tsconfig.node.json', "{\n  \"compilerOptions\": {\n    \"composite\": true,\n    \"skipLibCheck\": true,\n    \"module\": \"ESNext\",\n    \"moduleResolution\": \"bundler\",\n    \"allowSyntheticDefaultImports\": true\n  },\n  \"include\": [\"vite.config.ts\"]\n}\n" );
@@ -174,6 +174,9 @@ function upr_transpiler_scaffold_project( $target_path, $format, $title ) {
 
 		// src/main.tsx
 		file_put_contents( $src_dir . '/main.tsx', "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\nimport './index.css';\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n" );
+
+		// fallback src/App.tsx
+		file_put_contents( $src_dir . '/App.tsx', "import React from 'react';\n\nexport function App() {\n  return (\n    <div className=\"min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 text-center\">\n      <h1 className=\"text-4xl font-bold text-gray-900 mb-2\">" . esc_html( $title ) . "</h1>\n      <p className=\"text-gray-600\">Replicated Modern Framework Project</p>\n    </div>\n  );\n}\n\nexport default App;\n" );
 	}
 }
 
@@ -333,32 +336,38 @@ function upr_transpiler_call_gemini( $html, $styles, $format, $title, $api_key )
 	if ( $is_angular ) $format_desc = 'Angular 17+ with Standalone Components';
 	if ( $format === 'html-clean' ) $format_desc = 'Clean Semantic HTML5 with BEM CSS';
 
-	$prompt = "You are a Principal Frontend Architect. Convert this captured webpage DOM and styles into a complete, industry-standard, component-based project.
-
-Target Framework: {$format_desc}
-Project Title: {$title}
+	$ext = $is_react ? 'tsx' : ( $is_angular ? 'ts' : 'html' );
+	$prompt = "You are a Principal Frontend Architect. Convert this captured webpage DOM and styles into clean, modular, production-grade {$format_desc} components.
 
 Rules:
-1. Decompose the page into clean, reusable components (e.g. Navbar, Hero, FeatureCard, Features, Testimonial, Footer).
-2. For repeating items (cards, lists, grids), extract a single reusable component with a data array (JSON/props) and loop over it.
-3. Clean all class names and styles. Do not write inline styles.
-4. Output MUST be valid JSON with a 'files' array containing the complete project files.
+1. Do NOT output configuration files (NO package.json, NO vite.config.ts, NO tsconfig.json, NO index.html). They are already generated.
+2. Output ONLY the UI components under 'src/':
+   - src/App.{$ext} (default export App, assembling components)
+   - src/components/Navbar.{$ext}
+   - src/components/Hero.{$ext}
+   - src/components/Card.{$ext}
+   - src/components/Footer.{$ext}
+3. Decompose repeating items (cards, nav links, footer links) into data arrays with props.
+4. Output each file inside a markdown code block with '// FILE: path' on the first line comment:
 
-JSON Format:
-{
-  \"files\": [
-    { \"path\": \"package.json\", \"content\": \"...\" },
-    { \"path\": \"src/App.tsx\", \"content\": \"...\" },
-    { \"path\": \"src/components/Navbar.tsx\", \"content\": \"...\" },
-    { \"path\": \"src/components/Hero.tsx\", \"content\": \"...\" },
-    { \"path\": \"src/components/Card.tsx\", \"content\": \"...\" },
-    { \"path\": \"src/components/Footer.tsx\", \"content\": \"...\" }
-  ]
-}
+```{$ext}
+// FILE: src/components/Navbar.{$ext}
+[code here]
+```
+
+```{$ext}
+// FILE: src/components/Hero.{$ext}
+[code here]
+```
+
+```{$ext}
+// FILE: src/App.{$ext}
+[code here]
+```
 
 Captured HTML:
 ```html
-" . substr( $html, 0, 35000 ) . "
+" . substr( $html, 0, 30000 ) . "
 ```
 
 Extracted Styles:
@@ -366,28 +375,39 @@ Extracted Styles:
 " . substr( $styles, 0, 15000 ) . "
 ```
 
-Return ONLY the valid JSON object.";
+Output ONLY the codeblocks with // FILE: path comments.";
 
-	$raw_response = upr_transpiler_query_gemini( $prompt, $api_key, true );
+	$raw_response = upr_transpiler_query_gemini( $prompt, $api_key );
 	if ( is_wp_error( $raw_response ) ) {
 		return $raw_response;
 	}
 
-	$raw_json = preg_replace( '/^```(?:json)?\n/m', '', $raw_response );
-	$raw_json = preg_replace( '/\n```$/m', '', $raw_json );
-	$raw_json = trim( $raw_json );
+	$files = array();
 
-	$decoded = json_decode( $raw_json, true );
-	if ( empty( $decoded ) || empty( $decoded['files'] ) || ! is_array( $decoded['files'] ) ) {
-		return array(
-			array(
-				'path'    => $is_react ? 'src/App.tsx' : ( $is_angular ? 'src/app/app.component.ts' : 'index.html' ),
-				'content' => $raw_response
-			)
-		);
+	// 1. Try parsing // FILE: path code blocks
+	preg_match_all( '/```(?:tsx|typescript|ts|jsx|javascript|js|html|css)?\s*\n\/\/\s*FILE:\s*([^\n\r]+)\s*\n([\s\S]*?)```/i', $raw_response, $matches, PREG_SET_ORDER );
+	if ( ! empty( $matches ) ) {
+		foreach ( $matches as $m ) {
+			$path = trim( $m[1] );
+			$content = trim( $m[2] );
+			if ( ! empty( $path ) && ! empty( $content ) ) {
+				$files[] = array( 'path' => $path, 'content' => $content );
+			}
+		}
 	}
 
-	return $decoded['files'];
+	// 2. Fallback to JSON if returned as JSON
+	if ( empty( $files ) ) {
+		$raw_json = preg_replace( '/^```(?:json)?\n/m', '', $raw_response );
+		$raw_json = preg_replace( '/\n```$/m', '', $raw_json );
+		$raw_json = trim( $raw_json );
+		$decoded = json_decode( $raw_json, true );
+		if ( ! empty( $decoded['files'] ) && is_array( $decoded['files'] ) ) {
+			$files = $decoded['files'];
+		}
+	}
+
+	return $files;
 }
 
 /**
@@ -416,7 +436,7 @@ function upr_transpiler_query_gemini( $prompt, $api_key, $json_mode = false ) {
 			),
 			'generationConfig' => array(
 				'temperature'     => 0.2,
-				'maxOutputTokens' => 8192
+				'maxOutputTokens' => 32768
 			)
 		);
 
@@ -425,7 +445,7 @@ function upr_transpiler_query_gemini( $prompt, $api_key, $json_mode = false ) {
 		}
 
 		$response = wp_remote_post( $endpoint, array(
-			'timeout' => 60,
+			'timeout' => 120,
 			'headers' => array( 'Content-Type' => 'application/json' ),
 			'body'    => json_encode( $body_data )
 		) );

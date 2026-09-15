@@ -510,7 +510,7 @@ function upr_server_handle_replicate( WP_REST_Request $request ) {
 	require_once UPR_SERVER_PATH . 'includes/replicator-engine-server.php';
 	
 	$preserve_folder = ( $format !== 'raw' );
-	$package = upr_server_compile_page( $url, $preserve_folder );
+	$package = upr_server_execute_compile_page( $url, $preserve_folder );
 	if ( is_wp_error( $package ) ) {
 		return $package;
 	}
