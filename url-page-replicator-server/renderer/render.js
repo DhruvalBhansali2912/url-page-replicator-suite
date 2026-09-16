@@ -149,6 +149,8 @@ async function renderPage() {
             else if (contentType.includes('font/woff2')) ext = 'woff2';
             else if (contentType.includes('font/woff')) ext = 'woff';
             else if (contentType.includes('font/ttf')) ext = 'ttf';
+            else if (contentType.includes('video/mp4')) ext = 'mp4';
+            else if (contentType.includes('video/webm')) ext = 'webm';
             else {
               const parsedExt = path.extname(new URL(url).pathname);
               if (parsedExt) ext = parsedExt.substring(1);

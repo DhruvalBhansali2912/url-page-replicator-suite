@@ -298,7 +298,7 @@ function upr_server_transpile_component( $html, $css, $format, $title = 'Compone
  * Builds local media asset manifest from scraped images
  */
 function upr_transpiler_build_asset_manifest( $target_path, $html ) {
-	$media_exts = array( 'jpg', 'jpeg', 'png', 'gif', 'svg', 'webp' );
+	$media_exts = array( 'jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'mp4', 'webm' );
 	$manifest_lines = array();
 	$files = @scandir( $target_path );
 	if ( ! empty( $files ) ) {
@@ -660,30 +660,31 @@ CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES (APPLIES UNIVERSALLY TO ANY WEBSITE
    - Replicate the authentic dark/light themes, exact card background colors, and typography contrast from the captured DOM. Do NOT invent arbitrary background colors.
 
 2. HERO & PROMO CARD BUTTON GEOMETRY (CRITICAL - PREVENT OVERLAPPING ARTWORK):
-   - In Hero sections and Promo cards featuring product artwork or background imagery, ALWAYS keep the CTA buttons grouped together with the headline, subhead, and callout in the top content block (e.g. 'relative z-10 flex flex-col items-center pt-12 gap-3 text-center').
-   - NEVER use 'justify-between' or push CTA buttons to the absolute bottom of cards where they collide with or cover product art, watch faces, phone bodies, or illustrations.
-   - The CTA buttons must sit cleanly immediately below the subhead/callout, leaving the entire lower half of the card open for the background artwork.
+   - For standard hero banners and cards with centered or lower artwork: ALWAYS keep the CTA buttons grouped together with the headline, subhead, and callout in the top content block (e.g. 'relative z-10 flex flex-col items-center pt-12 gap-3 text-center').
+   - For split-layout cards (e.g. 'tile-content-split' where product artwork is centered and text is positioned above/below): Place the logo/title at the top, leave the center for the product artwork, and position the subhead, callout, and CTA buttons cleanly at the bottom ('flex flex-col justify-between items-center pb-12 pt-12 text-center') so buttons NEVER sit on top of product dials, screens, or faces.
+   - NEVER let CTA buttons collide with or cover product artwork, watches, phones, or illustrations.
 
-3. ASSET & IMAGE ACCURACY:
+3. ASSET, VIDEO & ANIMATION ACCURACY:
    - Carefully examine the Captured HTML and AVAILABLE LOCAL ASSETS list.
-   - Bind EVERY <img>, <picture>, and background image to its UNIQUE corresponding local asset path (with a leading slash, e.g. '/filename.jpg') found in that section of the Captured HTML.
-   - Never repeat a single placeholder or image across multiple distinct cards or slides. Each item must have its own unique image.
-   - For hero banners and promo cards, ensure background artwork uses full-bleed edge-to-edge styling: container 'relative overflow-hidden' with image 'absolute inset-0 w-full h-full object-cover pointer-events-none' and text content 'relative z-10'.
+   - Bind EVERY <img>, <picture>, <video>, and background image to its UNIQUE corresponding local asset path (with a leading slash, e.g. '/filename.jpg') found in that section of the Captured HTML.
+   - HERO ANIMATIONS & BACKGROUND VIDEOS: If the captured DOM contains <video> tags, animated media, or startframe posters (such as hero opening animations), render an autoplaying, muted, playsInline <video autoPlay muted playsInline poster="..."> with local video <source> or fallback <img> to deliver 100% authentic motion parity on page load.
+   - CAROUSEL SLIDES: Every slide MUST have its own UNIQUE high-resolution backdrop image from the assets manifest. NEVER repeat the same image across multiple slides.
 
 4. MODULAR COMPONENT DECOMPOSITION:
    - src/components/Navbar.{$ext}:
      * Container: Fixed/sticky top navigation with backdrop blur ('fixed top-0 left-0 right-0 z-50 backdrop-blur-md border-b text-xs h-12 flex items-center') matching the theme background.
      * Brand Logo: Render the authentic brand SVG logo (preserving viewBox and fill) or image.
      * Desktop Navigation & Hover Flyout Menus: If the captured DOM contains nested submenus, flyouts, or category links under nav items, implement an interactive 'activeDropdown' state with onMouseEnter/onMouseLeave to display a sleek, frosted dropdown panel ('fixed inset-x-0 top-12 backdrop-blur-2xl border-b p-8 z-40 transition-all shadow-2xl flex justify-center gap-12') containing multi-column subcategory links.
-     * Mobile Navigation Drawer: Implement a functional full-screen mobile slide-down drawer toggled with useState(false) and Lucide icons (Menu, X) displaying large links and categories on mobile viewports.
+     * Full-Height Mobile Navigation Drawer: Implement a functional full-height mobile slide-down drawer toggled with useState(false) and Lucide icons (Menu, X) occupying the entire viewport height ('fixed inset-0 top-12 bg-[#f5f5f7] z-50 h-[calc(100vh-48px)] flex flex-col px-8 pt-6 pb-12 overflow-y-auto') displaying a clean search bar and large category links ('text-[26px] font-semibold text-[#1d1d1f] hover:text-[#0071e3] transition-colors py-3 border-b border-black/5') with chevron indicators.
    - src/components/Hero.{$ext}:
      * Showcase all hero sections present in the captured DOM.
-     * Each hero container must have full-bleed edge-to-edge background media with headlines, subheads, and CTA buttons clustered cleanly above.
+     * Render opening video/animation for heroes that have animated motion.
+     * Follow split-layout geometry for cards with centered artwork.
    - src/components/PromoGrid.{$ext}:
-     * Responsive 2-column or multi-column grid of featured cards/products replicating the layout, card dimensions, artwork, titles, and CTA links from the captured HTML. Keep CTAs clustered at the top with titles.
+     * Responsive 2-column or multi-column grid of featured cards/products replicating the layout, card dimensions, artwork, titles, and CTA links from the captured HTML. Keep CTAs clustered with titles.
    - src/components/Carousel.{$ext}:
      * If the captured DOM contains sliders, carousels, or galleries, YOU MUST IMPLEMENT ALL OF THEM:
-       A) Continuous Multi-Card Filmstrip Slider: Full-width container ('w-full overflow-hidden py-10') showing 3 slides visible simultaneously across the viewport (center active card with scale/shadow, and adjacent cards visible at edges), with auto-advancing useEffect, Play/Pause toggle, Chevron navigation buttons, and expanding pill dot indicators.
+       A) Continuous Multi-Card Filmstrip Slider: Full-width container ('w-full overflow-hidden py-10 bg-black') showing 3 slides visible simultaneously across the viewport (center active card with scale/shadow, and adjacent cards visible at edges using dynamic calc(50vw - ...) translation), with auto-advancing useEffect, Play/Pause toggle, Chevron navigation buttons, and expanding pill dot indicators. Each slide must have its own unique image!
        B) Secondary Sliders / Stream Ribbons: If the DOM contains secondary ribbons or horizontal category card strips, render them as a horizontal scrolling strip ('flex gap-4 overflow-x-auto py-6 px-4 scrollbar-none') right below the main slider.
    - src/components/Footer.{$ext}:
      * Replicate the complete multi-column directory, category links, legal disclaimers, copyright notice, and locale/region selector exactly as captured in the DOM into responsive grid columns ('grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-8'). Do NOT truncate or squash columns.
