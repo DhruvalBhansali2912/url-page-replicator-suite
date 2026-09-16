@@ -501,6 +501,8 @@ function upr_server_handle_transpile_component( WP_REST_Request $request ) {
 
 // Main URL-to-page handler
 function upr_server_handle_replicate( WP_REST_Request $request ) {
+	@set_time_limit( 1800 );
+	@ini_set( 'max_execution_time', '1800' );
 	$url = esc_url_raw( $request->get_param( 'url' ) );
 	$format = sanitize_text_field( $request->get_param( 'format' ) ?? 'raw' );
 

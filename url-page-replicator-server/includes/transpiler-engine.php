@@ -849,7 +849,7 @@ function upr_transpiler_query_gemini( $prompt, $api_keys = null, $json_mode = fa
 			}
 
 			$response = wp_remote_post( $endpoint, array(
-				'timeout' => 180,
+				'timeout' => 360,
 				'headers' => array( 'Content-Type' => 'application/json' ),
 				'body'    => json_encode( $body_data )
 			) );

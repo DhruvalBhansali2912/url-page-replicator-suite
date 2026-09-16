@@ -109,15 +109,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const elapsed = Date.now() - (state.startedAt || 0);
 
-    // Auto-timeout if stuck for more than 3 minutes (180,000 ms)
-    if (state.isReplicating && elapsed > 180000) {
+    // Auto-timeout if stuck for more than 6 minutes (360,000 ms)
+    if (state.isReplicating && elapsed > 360000) {
       chrome.storage.local.remove('replicationState');
       replicateBtn.disabled = false;
       replicateBtn.querySelector('.btn-text').textContent = 'Generate & Download Project';
       replicateBtn.querySelector('.btn-spinner').classList.add('hidden');
       hideProgress();
       if (directDownloadContainer) directDownloadContainer.classList.add('hidden');
-      showAlert('Previous task timed out after 3 minutes. State has been reset.', 'error');
+      showAlert('Previous task timed out after 6 minutes. State has been reset.', 'error');
       return;
     }
 

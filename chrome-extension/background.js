@@ -77,7 +77,7 @@ async function handleReplication(data) {
   const controller = new AbortController();
   const abortTimer = setTimeout(() => {
     controller.abort();
-  }, 180000); // 3-minute hard timeout
+  }, 360000); // 6-minute hard timeout
 
   try {
     const response = await fetch(endpoint, {
@@ -136,7 +136,7 @@ async function handleReplication(data) {
     clearTimeout(abortTimer);
 
     const errMsg = err.name === 'AbortError' 
-      ? 'Replication timed out after 3 minutes. Please verify server status and retry.' 
+      ? 'Replication timed out after 6 minutes. Please verify server status and retry.' 
       : err.message;
 
     console.error('Background replication error:', errMsg);
