@@ -480,24 +480,27 @@ AVAILABLE LOCAL ASSETS (Stored in public/ - Reference directly with leading slas
 {$asset_manifest}
 
 CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES:
-1. EXACT LOCAL IMAGE BINDING (DO NOT HALLUCINATE OR REPEAT PRO PHONE):
-   - The Captured HTML below ALREADY contains the exact localized image paths in '<img src=\"/...\" />' tags!
-   - You MUST extract and use the exact 'src' from each corresponding section in the Captured HTML:
-     * Hero 1 (iPhone 18 Pro): Dark theme ('bg-black text-white'), use '/hero_iphone_18_pro_preorder__dd68unjbzswi_large.jpg'.
-     * Hero 2 (iPhone Duo): Light theme ('bg-[#f5f5f7] text-neutral-900'), MUST use the unfolded folding device held in two hands: '/hero_iphone_duo_announce__fh4u8yzndpe2_largetall.jpg'. NEVER repeat the Pro phone image here!
-     * Hero 3 (Apple Watch Series 12): Dark theme ('bg-black text-white'), MUST use the centered dual watches image: '/hero_apple_watch_series_12_preorder__cv2wd7ow8926_largetall.jpg' with logo '/hero_logo_apple_watch_series_12__eze8r897c5me_large.png'.
-2. HERO SECTIONS (SCALE & CENTERING):
-   - Hero container: 'w-full min-h-[580px] lg:min-h-[660px] flex flex-col items-center justify-between text-center relative overflow-hidden py-12 px-4'.
-   - Product images MUST NOT be tiny thumbnails: Use 'w-full max-w-[850px] lg:max-w-[1050px] object-contain mx-auto mt-6' (Watch image centered and large!).
-   - Typography: Bold headline ('text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight'), subheadline ('text-xl sm:text-2xl mt-2 text-neutral-300 font-normal'), and pill CTAs ('bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 py-2 text-sm font-medium', 'border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white rounded-full px-5 py-2 text-sm font-medium transition-colors').
+1. EXACT LOCAL HERO & PROMO IMAGE BINDINGS (DO NOT GUESS OR USE RANDOM MD5 HASHES):
+   - Hero 1 (iPhone 18 Pro): Dark theme ('bg-black text-white'). Full-bleed background image: '/hero_iphone_18_pro_preorder__dd68unjbzswi_largetall_2x.jpg' (or '_large.jpg').
+   - Hero 2 (iPhone Duo): Light theme ('bg-[#f5f5f7] text-neutral-900'). Full-bleed background image of unfolded folding device held in hands: '/hero_iphone_duo_announce__fh4u8yzndpe2_largetall_2x.jpg' (or '_large.jpg'). NEVER repeat the Pro phone image here!
+   - Hero 3 (Apple Watch Series 12): Dark theme ('bg-black text-white'). Logo: '/hero_logo_apple_watch_series_12__eze8r897c5me_large_2x.png' (h-8 sm:h-11 object-contain mx-auto mb-2). Full-bleed background image: '/hero_apple_watch_series_12_preorder__cv2wd7ow8926_largetall_2x.jpg'.
+   - ALL 6 PROMO CARDS (MUST USE THESE EXACT NAMED ASSETS, NEVER RANDOM MD5 HASHES):
+     * Card 1 (Apple Watch Ultra 4, dark theme): Logo '/promo_logo_apple_watch_ultra_4__bc6ish8cjaeq_large_2x.png', subhead 'A battery you can\'t outrun.', callout 'Available starting 9.18', artwork '/promo_apple_watch_ultra_4_preorder__fvnta8sy0wa6_large_2x.jpg'.
+     * Card 2 (AirPods 5, dark theme): Title 'AirPods 5', subhead 'Discover the magic of Active Noise Cancellation.', callout 'Available starting 9.18', artwork '/promo_airpods_5_preorder__lydvte0llb6i_large_2x.jpg' (photo with warm backlight).
+     * Card 3 (iCloud+, light theme): Logo '/promo_logo_icloud_plus__5vu3k83czpey_large_2x.png', subhead 'Supercharge your iPhone with added storage, privacy features, and more.', artwork '/promo_icloud_plus__ge2cxxb5li2y_large_2x.jpg' (white iPhone in sky-blue clouds).
+     * Card 4 (MacBook Air, light theme): Title 'MacBook Air', subhead 'Now supercharged by M5.', artwork '/promo_macbook_air_m5__e5xk2yysqiie_large_2x.jpg' (two MacBook Air laptops in sky blue).
+     * Card 5 (Apple Upgrade, light theme): Logo '/promo_logo_apple_upgrade__lwuohffdzjem_large_2x.png', subhead 'Love it. Lease it. Upgrade it.', artwork '/promo_apple_upgrade__jvn6udm4tx2e_large_2x.jpg' (iPhone spectrum fan).
+     * Card 6 (Apple Card, light theme): Logo '/promo_logo_apple_card__28vxrcexz0ia_large_2x.png', subhead 'Get up to 3% Daily Cash back with every purchase.', artwork '/promo_apple_card__d8xz4kd4evwy_large_2x.jpg' (titanium card).
+2. HERO SECTIONS (FULL-BLEED APPLE HERO STYLING):
+   - Hero container: 'relative w-full h-[580px] sm:h-[640px] lg:h-[692px] overflow-hidden flex flex-col items-center justify-between text-center pt-12 sm:pt-14 pb-8 px-4 select-none'.
+   - Background image: '<img src=\"...\" alt=\"...\" className=\"absolute inset-0 w-full h-full object-cover object-bottom pointer-events-none transition-transform duration-700 hover:scale-[1.02]\" />'.
+   - Top text container: 'relative z-10 max-w-2xl mx-auto flex flex-col items-center' with headline ('text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight'), subhead ('text-xl sm:text-2xl mt-1.5 font-normal'), and pill CTAs ('bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 py-2 text-sm font-medium shadow-md active:scale-95', 'border border-blue-600 rounded-full px-5 py-2 text-sm font-medium active:scale-95').
 3. PROMO CARDS (FULL-BLEED EDGE-TO-EDGE ARTWORK):
-   - 2-column responsive grid on desktop: 'grid grid-cols-1 md:grid-cols-2 gap-4 max-w-[1280px] mx-auto px-4 my-4'.
-   - EVERY PROMO CARD MUST HAVE FULL-BLEED EDGE-TO-EDGE BACKGROUND ARTWORK (like Apple.com):
-     Outer container: relative min-h-[560px] rounded-3xl overflow-hidden flex flex-col justify-between items-center text-center p-8 bg-neutral-900.
-     Image element: '<img src=\"/promo_airpods_5__large.jpg\" alt=\"AirPods 5\" className=\"absolute inset-0 w-full h-full object-cover object-center\" />'.
-     Text overlay container: relative z-10 flex flex-col items-center with title, subhead, and CTA pill links.
-   - Cards in grid: Watch Ultra 4, AirPods 5, iCloud+, MacBook Air, Apple Upgrade, Apple Card.
-   - Use the exact full-bleed artwork image path for each card from the Captured HTML.
+   - 2-column responsive grid on desktop: 'grid grid-cols-1 md:grid-cols-2 gap-3 max-w-[1280px] mx-auto px-4 my-3'.
+   - EVERY PROMO CARD MUST HAVE FULL-BLEED EDGE-TO-EDGE BACKGROUND ARTWORK:
+     Outer container: 'relative min-h-[560px] rounded-3xl overflow-hidden flex flex-col justify-between items-center text-center p-8 bg-neutral-900 shadow-sm'.
+     Image element: '<img src=\"...\" alt=\"...\" className=\"absolute inset-0 w-full h-full object-cover object-center pointer-events-none hover:scale-105 transition-transform duration-700 ease-out\" />'.
+     Text overlay container: 'relative z-10 flex flex-col items-center max-w-sm pt-2' with title/logo, subhead, callout, and pill CTAs.
 4. MOBILE NAVIGATION (FULL-SCREEN DRAWER):
    - In Navbar.tsx, implement a mobile drawer with useState(false) and hamburger toggle icons ('Menu' and 'X' from 'lucide-react').
    - When opened on mobile, it MUST be a full-screen drawer: 'fixed inset-x-0 top-12 bottom-0 bg-neutral-950/95 backdrop-blur-2xl z-50 flex flex-col px-8 py-8 space-y-4 overflow-y-auto'.

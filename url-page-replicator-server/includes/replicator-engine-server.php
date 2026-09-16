@@ -784,10 +784,25 @@ function uprs_download_and_localize_image( $url, $base_url, $target_path, $targe
 		$original_filename = sanitize_file_name( urldecode( basename( $parsed_path ) ) );
 	}
 
-	// Use original filename directly to support React ESM modules and prevent duplicate loads / React Hook errors
+	static $uprs_url_cache = array();
+	if ( isset( $uprs_url_cache[ $abs_url ] ) ) {
+		return $uprs_url_cache[ $abs_url ];
+	}
+
+	// Use original filename directly, but prefix unique hash if generic dimension (e.g. 1250x668.jpg) or already taken
 	if ( ! empty( $original_filename ) && strpos( $original_filename, '.' ) !== false ) {
-		$filename = $original_filename;
 		$ext = strtolower( pathinfo( $original_filename, PATHINFO_EXTENSION ) );
+		// If filename is a generic dimension like 1250x668sr.jpg, 470x264.jpg, etc., make it unique per URL
+		if ( preg_match( '/^\d+x\d+/i', $original_filename ) ) {
+			$filename = substr( md5( $abs_url ), 0, 8 ) . '_' . $original_filename;
+		} else {
+			$filename = $original_filename;
+			// If already taken by a different URL in this compilation, append short hash
+			if ( in_array( './' . $filename, $uprs_url_cache, true ) ) {
+				$name_part = pathinfo( $original_filename, PATHINFO_FILENAME );
+				$filename = $name_part . '_' . substr( md5( $abs_url ), 0, 8 ) . '.' . $ext;
+			}
+		}
 	} else {
 		$ext = ! empty( $parsed_path ) ? pathinfo( $parsed_path, PATHINFO_EXTENSION ) : '';
 		if ( empty( $ext ) ) {
@@ -799,6 +814,7 @@ function uprs_download_and_localize_image( $url, $base_url, $target_path, $targe
 
 	$filepath  = $target_path . '/' . $filename;
 	$local_url = './' . $filename;
+	$uprs_url_cache[ $abs_url ] = $local_url;
 
 	if ( ! file_exists( $filepath ) ) {
 		$abs_url_cb = $abs_url;
