@@ -148,7 +148,7 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 	}
 
 	// 7. Post-process assets to deterministically eliminate any broken images, diversify media, and preserve motion
-	upr_transpiler_post_process_assets( $src_dir, $target_path . '/public', $detected_videos );
+	upr_transpiler_post_process_assets( $src_dir, $target_path . '/public', $detected_videos, $raw_html );
 
 	// Save transpilation metadata
 	$meta = array(
@@ -521,7 +521,7 @@ function upr_transpiler_sanitize_dom( $html, $target_path = '' ) {
 /**
  * Deterministic Post-Processor: Ensures all image references in generated React code exist on disk
  */
-function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_videos = array() ) {
+function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_videos = array(), $raw_html = '' ) {
 	if ( ! is_dir( $src_dir ) || ! is_dir( $public_dir ) ) {
 		return;
 	}
@@ -540,16 +540,33 @@ function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_vi
 		return;
 	}
 
-	// Distinct movie/show posters available on disk for Carousel
+	// Distinct movie/show posters available on disk for Carousel (sorted high-res first)
 	$poster_candidates = array();
 	foreach ( $files_on_disk as $f ) {
 		if ( preg_match( '/\.(jpg|png|webp)$/i', $f ) && ( preg_match( '/^(?:[a-f0-9]{8}_)?\d+x\d+/i', $f ) || preg_match( '/^[a-f0-9]{32}\.jpg$/i', $f ) ) ) {
-			$filesize = @filesize( $public_dir . '/' . $f );
+			$filesize = (int) @filesize( $public_dir . '/' . $f );
 			if ( $filesize > 15000 ) { // Real high-res poster
 				$poster_candidates[] = '/' . $f;
 			}
 		}
 	}
+	usort( $poster_candidates, function( $a, $b ) use ( $public_dir ) {
+		$size_a = (int) @filesize( $public_dir . '/' . ltrim( $a, '/' ) );
+		$size_b = (int) @filesize( $public_dir . '/' . ltrim( $b, '/' ) );
+		return $size_b <=> $size_a;
+	} );
+
+	// Deduplicate identical files by filesize so duplicate dimension filenames are eliminated
+	$unique_posters = array();
+	$seen_sizes = array();
+	foreach ( $poster_candidates as $p ) {
+		$sz = (int) @filesize( $public_dir . '/' . ltrim( $p, '/' ) );
+		if ( ! in_array( $sz, $seen_sizes, true ) ) {
+			$seen_sizes[] = $sz;
+			$unique_posters[] = $p;
+		}
+	}
+	$poster_candidates = $unique_posters;
 
 	$src_files = array_merge(
 		(array) glob( $src_dir . '/*.tsx' ),
@@ -626,19 +643,37 @@ function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_vi
 			if ( count( $poster_candidates ) >= 3 ) {
 				$p_idx = 0;
 				$seen_imgs = array();
-				$code = preg_replace_callback( '/image:\s*(["\'])\/([^"\']+)\1/i', function( $m ) use ( $poster_candidates, &$p_idx, &$seen_imgs, &$modified ) {
-					$curr = $m[2];
+				// Universal regex matching any image/bg/src/poster/backdrop/img property in slides array
+				$code = preg_replace_callback( '/([\'"]?(?:image|bg|src|poster|backdrop|img|thumbnail)[\'"]?\s*:\s*)([\'"])\/([^\'"]+)\2/i', function( $m ) use ( $poster_candidates, &$p_idx, &$seen_imgs, &$modified ) {
+					$prefix = $m[1];
+					$quote  = $m[2];
+					$curr   = $m[3];
 					if ( in_array( $curr, $seen_imgs, true ) || preg_match( '/^\d+x\d+/i', $curr ) ) {
 						if ( isset( $poster_candidates[ $p_idx ] ) ) {
 							$next_poster = $poster_candidates[ $p_idx++ ];
 							$seen_imgs[] = ltrim( $next_poster, '/' );
+							$seen_imgs[] = $curr;
 							$modified = true;
-							return 'image: ' . $m[1] . $next_poster . $m[1];
+							return $prefix . $quote . $next_poster . $quote;
 						}
 					}
 					$seen_imgs[] = $curr;
 					return $m[0];
 				}, $code );
+			}
+
+			// Universally detect if the captured webpage DOM contains secondary carousels / card stream ribbons
+			$has_secondary_in_dom = ! empty( $raw_html ) && (
+				preg_match_all( '/<(?:section|div|ul)\b[^>]*?(?:data-[\w\-]*gallery|class=["\'][^"\']*(?:gallery|slider|carousel|swiper|splide|stream)[^"\']*)[^>]*>/i', $raw_html, $g_matches ) && count( $g_matches[0] ) >= 2
+			);
+			$has_secondary_in_code = ( substr_count( $code, 'const [' ) > 3 || strpos( $code, 'secondaryCards' ) !== false || strpos( $code, 'streamCards' ) !== false || strpos( $code, 'serviceCards' ) !== false );
+
+			if ( $has_secondary_in_dom && ! $has_secondary_in_code ) {
+				$secondary_cards = upr_transpiler_extract_secondary_gallery_cards( $raw_html, $files_on_disk );
+				if ( ! empty( $secondary_cards ) ) {
+					$code = upr_transpiler_inject_secondary_gallery( $code, $secondary_cards );
+					$modified = true;
+				}
 			}
 		}
 
@@ -672,9 +707,9 @@ function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_vi
 					}
 				}
 
-				// Universally wrap primary hero visual image with the authentic video element
+				// Universally wrap primary hero visual image with the authentic video element (handles multiline attributes & self-closing tags)
 				$code = preg_replace(
-					'/<img\b([^>]*className=["\'][^"\']*(?:w-full|object-cover|hero)[^"\']*)>/i',
+					'/<img\b([^>]*?className=["\'][^"\']*(?:w-full|object-cover|hero)[^"\']*(?:[^>]*?))\s*\/?>/is',
 					'<video playsInline muted autoPlay loop' . $poster_attr . ' className="w-full h-full object-cover object-bottom"><source src="' . $v_src . '" type="video/mp4" /><img $1 /></video>',
 					$code,
 					1,
@@ -690,6 +725,166 @@ function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_vi
 			file_put_contents( $filepath, $code );
 		}
 	}
+}
+
+/**
+ * Universally extracts secondary stream ribbon / category gallery items from raw HTML without any brand-specific keywords
+ */
+function upr_transpiler_extract_secondary_gallery_cards( $raw_html, $files_on_disk ) {
+	$cards = array();
+	$matches = array();
+
+	// Extract candidate card/slide items that contain category metadata, tags, or badges
+	if ( preg_match_all( '/<(?:li|div)\b([^>]*?data-[\w\-]*(?:service|category|topic|genre)=[^>]*)>(.*?)<\/(?:li|div)>/is', $raw_html, $cat_matches, PREG_SET_ORDER ) ) {
+		$matches = $cat_matches;
+	} elseif ( preg_match_all( '/<(?:li|div)\b([^>]*?(?:class=["\'][^"\']*(?:gallery-item|slide|card)[^"\']*|data-[\w\-]*item)[^>]*)>(.*?)<\/(?:li|div)>/is', $raw_html, $fallback_matches, PREG_SET_ORDER ) ) {
+		// Filter to items that have distinct category badges or logo classes
+		foreach ( $fallback_matches as $fm ) {
+			if ( preg_match( '/data-[\w\-]*(?:service|category|topic|genre)=/i', $fm[1] ) || preg_match( '/class=["\'][^"\']*(?:logo|badge|tag)-[a-z0-9]+/i', $fm[2] ) ) {
+				$matches[] = $fm;
+			}
+		}
+	}
+
+	if ( empty( $matches ) ) {
+		return $cards;
+	}
+
+	$seen_imgs = array();
+	foreach ( $matches as $m ) {
+		$attrs = $m[1];
+		$inner = $m[2];
+
+		// 1. Dynamic category extraction (100% universal from DOM)
+		$category = '';
+		if ( preg_match( '/data-[\w\-]*(?:service|category|topic|genre)=["\']([^"\']+)["\']/i', $attrs, $sm ) ) {
+			$category = ucwords( trim( preg_replace( '/[-_]+/', ' ', $sm[1] ) ) );
+		} elseif ( preg_match( '/class=["\'][^"\']*(?:logo|badge|tag)-([a-zA-Z0-9\-]+)/i', $inner, $sm ) ) {
+			$category = ucwords( trim( preg_replace( '/[-_]+/', ' ', $sm[1] ) ) );
+		}
+
+		// 2. Dynamic title extraction
+		$title = '';
+		if ( preg_match( '/<(?:p|h3|h4|h5|span)\b[^>]*class=["\'][^"\']*(?:longnote|headline|title|name)[^"\']*[^>]*>(.*?)<\/(?:p|h3|h4|h5|span)>/is', $inner, $tm ) ) {
+			$title = trim( strip_tags( $tm[1] ) );
+		} elseif ( preg_match( '/aria-label=["\']([^"\']+)["\']/i', $inner, $tm ) || preg_match( '/aria-label=["\']([^"\']+)["\']/i', $attrs, $tm ) ) {
+			$title = trim( $tm[1] );
+		}
+		$title = preg_replace( '/^(?:listen|play|watch|stream|get|view|shop|read)\s+now,?\s*/i', '', $title );
+		if ( empty( $title ) ) {
+			continue;
+		}
+
+		// 3. Dynamic CTA extraction from button, div, or span markup
+		$cta = 'Explore';
+		if ( preg_match( '/<(?:div|button|span)\b[^>]*class=["\'][^"\']*(?:button|cta|action|badge)[^"\']*[^>]*>(.*?)<\/(?:div|button|span)>/is', $inner, $cta_m ) ) {
+			$clean_cta = trim( strip_tags( $cta_m[1] ) );
+			if ( strlen( $clean_cta ) >= 2 && strlen( $clean_cta ) <= 20 ) {
+				$cta = $clean_cta;
+			}
+		}
+
+		// 4. Dynamic authentic local image resolution
+		$img_path = '';
+		if ( preg_match_all( '/(?:src|srcset)=["\']([^"\']+)["\']/i', $inner, $img_m ) ) {
+			foreach ( $img_m[1] as $u ) {
+				$candidates = explode( ',', $u );
+				foreach ( $candidates as $cand ) {
+					$parts = preg_split( '/\s+/', trim( $cand ) );
+					$base = basename( parse_url( $parts[0], PHP_URL_PATH ) );
+					if ( in_array( $base, $files_on_disk, true ) && ! in_array( $base, $seen_imgs, true ) ) {
+						$img_path = '/' . $base;
+						$seen_imgs[] = $base;
+						break 2;
+					}
+				}
+			}
+			if ( empty( $img_path ) ) {
+				foreach ( $img_m[1] as $u ) {
+					$candidates = explode( ',', $u );
+					foreach ( $candidates as $cand ) {
+						$parts = preg_split( '/\s+/', trim( $cand ) );
+						$base = basename( parse_url( $parts[0], PHP_URL_PATH ) );
+						if ( in_array( $base, $files_on_disk, true ) ) {
+							$img_path = '/' . $base;
+							break 2;
+						}
+					}
+				}
+			}
+		}
+
+		if ( ! empty( $img_path ) && strlen( $title ) >= 3 ) {
+			$cards[] = array(
+				'id'       => sanitize_title( substr( $title, 0, 24 ) ),
+				'category' => $category ?: 'Featured',
+				'title'    => html_entity_decode( $title, ENT_QUOTES, 'UTF-8' ),
+				'cta'      => $cta,
+				'image'    => $img_path
+			);
+		}
+	}
+	return $cards;
+}
+
+/**
+ * Injects secondary stream ribbon component into Carousel.tsx
+ */
+function upr_transpiler_inject_secondary_gallery( $code, $cards, $section_title = 'Featured Stream' ) {
+	if ( empty( $cards ) ) {
+		return $code;
+	}
+
+	$json_cards = json_encode( $cards, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
+
+	// 1. Insert secondaryCards data definition
+	$cards_def = "\n  const secondaryCards = " . $json_cards . ";\n";
+	if ( preg_match( '/(const\s+slides\s*=\s*\[[\s\S]*?\];)/i', $code, $sm ) ) {
+		$code = str_replace( $sm[1], $sm[1] . "\n" . $cards_def, $code );
+	} elseif ( preg_match( '/(export\s+const\s+Carousel[^{]*\{)/i', $code, $sm ) ) {
+		$code = str_replace( $sm[1], $sm[1] . "\n" . $cards_def, $code );
+	}
+
+	// 2. Insert JSX block before closing </section>
+	$jsx_ribbon = '
+      {/* Secondary Category / Stream Ribbon */}
+      <div className="w-full pt-14 pb-8 overflow-hidden">
+        <div className="max-w-[1260px] mx-auto px-6 mb-6">
+          <h3 className="text-2xl md:text-3xl font-semibold tracking-tight text-white">' . esc_html( $section_title ) . '</h3>
+        </div>
+        <div className="w-full overflow-x-auto no-scrollbar pl-6 md:pl-12 flex gap-4 pb-4">
+          {secondaryCards.map((card) => (
+            <div
+              key={card.id}
+              className="flex-shrink-0 w-[280px] md:w-[320px] h-[360px] md:h-[400px] rounded-2xl overflow-hidden relative group bg-[#161617] border border-white/10 flex flex-col justify-end p-6"
+            >
+              <div className="absolute inset-0 z-0">
+                <img src={card.image} alt={card.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
+              </div>
+              <div className="relative z-10 flex flex-col items-start space-y-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-[#2997ff] bg-black/40 px-2.5 py-1 rounded-full backdrop-blur-md">
+                  {card.category}
+                </span>
+                <p className="text-base md:text-lg font-semibold text-white leading-snug line-clamp-2">
+                  {card.title}
+                </p>
+                <div className="bg-white text-black px-4 py-1.5 rounded-full text-xs font-medium hover:bg-white/90 transition-colors mt-2">
+                  {card.cta}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+';
+
+	$pos = strrpos( $code, '</section>' );
+	if ( $pos !== false ) {
+		$code = substr_replace( $code, $jsx_ribbon . "\n    </section>", $pos, strlen( '</section>' ) );
+	}
+
+	return $code;
 }
 
 /**
