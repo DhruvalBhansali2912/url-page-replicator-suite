@@ -612,29 +612,44 @@ function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_vi
 		// 2. Component-specific parity & quality enforcement
 		$filename_base = basename( $filepath );
 
-		// Carousel: Guarantee unique high-res posters across slides (never repeat identical poster)
-		if ( ( $filename_base === 'Carousel.tsx' || $filename_base === 'Carousel.ts' ) && count( $poster_candidates ) >= 3 ) {
-			$p_idx = 0;
-			$seen_imgs = array();
-			$code = preg_replace_callback( '/image:\s*(["\'])\/([^"\']+)\1/i', function( $m ) use ( $poster_candidates, &$p_idx, &$seen_imgs, &$modified ) {
-				$curr = $m[2];
-				if ( in_array( $curr, $seen_imgs, true ) || preg_match( '/^\d+x\d+/i', $curr ) ) {
-					if ( isset( $poster_candidates[ $p_idx ] ) ) {
-						$next_poster = $poster_candidates[ $p_idx++ ];
-						$seen_imgs[] = ltrim( $next_poster, '/' );
-						$modified = true;
-						return 'image: ' . $m[1] . $next_poster . $m[1];
+		// Carousel: Guarantee unique high-res posters across slides (never repeat identical poster) and clean arrow-free controls
+		if ( $filename_base === 'Carousel.tsx' || $filename_base === 'Carousel.ts' ) {
+			// Strip unnecessary chevron arrow navigation buttons unless explicitly present in DOM
+			if ( strpos( $code, 'ChevronLeft' ) !== false || strpos( $code, 'ChevronRight' ) !== false ) {
+				$code = preg_replace( '/\s*,\s*Chevron(?:Left|Right)/', '', $code );
+				$code = preg_replace( '/Chevron(?:Left|Right)\s*,\s*/', '', $code );
+				$code = preg_replace( '/<button[^>]*onClick=\{[^}]*handle(?:Prev|Next)[^}]*\}[^>]*>[\s\S]*?<\/button>/i', '', $code );
+				$code = preg_replace( '/<button[^>]*aria-label=["\'](?:Previous|Next) slide["\'][^>]*>[\s\S]*?<\/button>/i', '', $code );
+				$modified = true;
+			}
+
+			if ( count( $poster_candidates ) >= 3 ) {
+				$p_idx = 0;
+				$seen_imgs = array();
+				$code = preg_replace_callback( '/image:\s*(["\'])\/([^"\']+)\1/i', function( $m ) use ( $poster_candidates, &$p_idx, &$seen_imgs, &$modified ) {
+					$curr = $m[2];
+					if ( in_array( $curr, $seen_imgs, true ) || preg_match( '/^\d+x\d+/i', $curr ) ) {
+						if ( isset( $poster_candidates[ $p_idx ] ) ) {
+							$next_poster = $poster_candidates[ $p_idx++ ];
+							$seen_imgs[] = ltrim( $next_poster, '/' );
+							$modified = true;
+							return 'image: ' . $m[1] . $next_poster . $m[1];
+						}
 					}
-				}
-				$seen_imgs[] = $curr;
-				return $m[0];
-			}, $code );
+					$seen_imgs[] = $curr;
+					return $m[0];
+				}, $code );
+			}
 		}
 
-		// PromoGrid: Replace tight 3px black margins with clean 12px responsive gutters
+		// PromoGrid: Ensure full viewport width (no artificial max-width box) and clean 12px responsive gutters
 		if ( $filename_base === 'PromoGrid.tsx' || $filename_base === 'PromoGrid.ts' ) {
-			if ( strpos( $code, 'gap-[3px]' ) !== false || strpos( $code, 'py-[3px]' ) !== false ) {
-				$code = str_replace( array( 'gap-[3px]', 'py-[3px]', 'bg-black py-[3px]' ), array( 'gap-3', 'py-3', 'bg-white py-3' ), $code );
+			if ( strpos( $code, 'gap-[3px]' ) !== false || strpos( $code, 'py-[3px]' ) !== false || strpos( $code, 'max-w-[1440px]' ) !== false || strpos( $code, 'max-w-[1280px]' ) !== false ) {
+				$code = str_replace(
+					array( 'gap-[3px]', 'py-[3px]', 'bg-black py-[3px]', 'max-w-[1440px] mx-auto', 'max-w-[1280px] mx-auto' ),
+					array( 'gap-3', 'pb-3', 'bg-white pb-3', 'w-full', 'w-full' ),
+					$code
+				);
 				$modified = true;
 			}
 		}
@@ -770,12 +785,13 @@ CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES (APPLIES UNIVERSALLY TO ANY WEBSITE
      * Showcase all hero sections present in the captured DOM.
      * Render opening video/animation for heroes that have animated motion.
      * Follow split-layout geometry for cards with centered artwork.
-   - src/components/PromoGrid.{$ext}:
-     * Responsive 2-column or multi-column grid of featured cards/products replicating the layout, card dimensions, artwork, titles, and CTA links from the captured HTML. Keep CTAs clustered with titles.
-   - src/components/Carousel.{$ext}:
-     * If the captured DOM contains sliders, carousels, or galleries, YOU MUST IMPLEMENT ALL OF THEM:
-       A) Continuous Multi-Card Filmstrip Slider: Full-width container ('w-full overflow-hidden py-10 bg-black') showing 3 slides visible simultaneously across the viewport (center active card with scale/shadow, and adjacent cards visible at edges using dynamic calc(50vw - ...) translation), with auto-advancing useEffect, Play/Pause toggle, Chevron navigation buttons, and expanding pill dot indicators. Each slide must have its own unique image!
-       B) Secondary Sliders / Stream Ribbons: If the DOM contains secondary ribbons or horizontal category card strips, render them as a horizontal scrolling strip ('flex gap-4 overflow-x-auto py-6 px-4 scrollbar-none') right below the main slider.
+    - src/components/PromoGrid.{$ext}:
+      * Responsive 2-column or multi-column grid of featured cards/products replicating the layout, card dimensions, artwork, titles, and CTA links from the captured HTML.
+      * FULL VIEWPORT WIDTH: Use edge-to-edge container ('w-full px-3 pb-3 bg-white') without artificial max-width constraints (e.g. 'grid grid-cols-1 md:grid-cols-2 gap-3 w-full'). Keep CTAs and titles clustered cleanly at top ('pt-[53px] pb-[60px] px-6').
+    - src/components/Carousel.{$ext}:
+      * If the captured DOM contains sliders, carousels, or galleries, YOU MUST IMPLEMENT ALL OF THEM:
+        A) Continuous Multi-Card Filmstrip Slider: Full-width container ('w-full overflow-hidden pt-16 pb-12 bg-black') showing 3 slides visible simultaneously across the viewport (center active card with scale/shadow 'w-[1260px] max-w-[85vw]', and adjacent cards visible at edges using dynamic calc(50vw - 630px - ...) translation), with auto-advancing useEffect, Play/Pause toggle, and expanding pill dot indicators. Do NOT include chevron navigation arrow buttons unless explicitly present in the captured DOM. Each slide MUST have its own unique image!
+        B) Secondary Sliders / Stream Ribbons: If the DOM contains secondary ribbons or horizontal category card strips, render them as a full-bleed horizontal scrolling strip ('w-full overflow-hidden flex gap-4 pl-6 md:pl-12') right below the main slider, using real captured media assets and pill dot indicators.
    - src/components/Footer.{$ext}:
      * Replicate the complete multi-column directory, category links, legal disclaimers, copyright notice, and locale/region selector exactly as captured in the DOM into responsive grid columns ('grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-8'). Do NOT truncate or squash columns.
    - src/App.{$ext}:
