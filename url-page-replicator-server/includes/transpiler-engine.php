@@ -667,7 +667,7 @@ CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES (APPLIES UNIVERSALLY TO ANY WEBSITE
 3. ASSET, VIDEO & ANIMATION ACCURACY:
    - Carefully examine the Captured HTML and AVAILABLE LOCAL ASSETS list.
    - Bind EVERY <img>, <picture>, <video>, and background image to its UNIQUE corresponding local asset path (with a leading slash, e.g. '/filename.jpg') found in that section of the Captured HTML.
-   - HERO ANIMATIONS & BACKGROUND VIDEOS: If the captured DOM contains <video> tags, animated media, or startframe posters (such as hero opening animations), render an autoplaying, muted, playsInline <video autoPlay muted playsInline poster="..."> with local video <source> or fallback <img> to deliver 100% authentic motion parity on page load.
+   - HERO ANIMATIONS & BACKGROUND VIDEOS: If the captured DOM contains <video> tags, animated media, or startframe posters (such as hero opening animations), render an autoplaying, muted, playsInline <video autoPlay muted playsInline poster='...'> with local video <source> or fallback <img> to deliver 100% authentic motion parity on page load.
    - CAROUSEL SLIDES: Every slide MUST have its own UNIQUE high-resolution backdrop image from the assets manifest. NEVER repeat the same image across multiple slides.
 
 4. MODULAR COMPONENT DECOMPOSITION:
