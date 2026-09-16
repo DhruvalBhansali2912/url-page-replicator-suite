@@ -903,12 +903,14 @@ function upr_transpiler_inject_secondary_gallery( $code, $cards, $section_title 
 
 	$json_cards = json_encode( $cards, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
 
-	// 1. Insert secondaryCards data definition
-	$cards_def = "\n  const secondaryCards = " . $json_cards . ";\n";
-	if ( preg_match( '/(const\s+slides\s*=\s*\[[\s\S]*?\];)/i', $code, $sm ) ) {
+	// 1. Insert secondaryCards data definition at module level above Carousel component
+	$cards_def = "\nconst secondaryCards = " . $json_cards . ";\n";
+	if ( preg_match( '/\b(export\s+(?:default\s+)?function\s+Carousel|export\s+const\s+Carousel|function\s+Carousel|const\s+Carousel\b)/i', $code, $sm ) ) {
+		$code = str_replace( $sm[0], $cards_def . "\n" . $sm[0], $code );
+	} elseif ( preg_match( '/(const\s+slides[\s\S]*?\];)/i', $code, $sm ) ) {
 		$code = str_replace( $sm[1], $sm[1] . "\n" . $cards_def, $code );
-	} elseif ( preg_match( '/(export\s+const\s+Carousel[^{]*\{)/i', $code, $sm ) ) {
-		$code = str_replace( $sm[1], $sm[1] . "\n" . $cards_def, $code );
+	} else {
+		$code = $cards_def . "\n" . $code;
 	}
 
 	// 2. Insert JSX block before closing </section>
