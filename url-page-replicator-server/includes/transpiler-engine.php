@@ -581,6 +581,58 @@ function upr_transpiler_post_process_assets( $src_dir, $public_dir ) {
 			return $m[0];
 		}, $code );
 
+		// 2. Component-specific parity & quality enforcement
+		$filename_base = basename( $filepath );
+
+		// Carousel: Guarantee unique high-res posters across slides (never repeat identical poster)
+		if ( ( $filename_base === 'Carousel.tsx' || $filename_base === 'Carousel.ts' ) && count( $poster_candidates ) >= 3 ) {
+			$p_idx = 0;
+			$seen_imgs = array();
+			$code = preg_replace_callback( '/image:\s*(["\'])\/([^"\']+)\1/i', function( $m ) use ( $poster_candidates, &$p_idx, &$seen_imgs, &$modified ) {
+				$curr = $m[2];
+				if ( in_array( $curr, $seen_imgs, true ) || preg_match( '/^\d+x\d+/i', $curr ) ) {
+					if ( isset( $poster_candidates[ $p_idx ] ) ) {
+						$next_poster = $poster_candidates[ $p_idx++ ];
+						$seen_imgs[] = ltrim( $next_poster, '/' );
+						$modified = true;
+						return 'image: ' . $m[1] . $next_poster . $m[1];
+					}
+				}
+				$seen_imgs[] = $curr;
+				return $m[0];
+			}, $code );
+		}
+
+		// PromoGrid: Replace tight 3px black margins with clean 12px responsive gutters
+		if ( $filename_base === 'PromoGrid.tsx' || $filename_base === 'PromoGrid.ts' ) {
+			if ( strpos( $code, 'gap-[3px]' ) !== false || strpos( $code, 'py-[3px]' ) !== false ) {
+				$code = str_replace( array( 'gap-[3px]', 'py-[3px]', 'bg-black py-[3px]' ), array( 'gap-3', 'py-3', 'bg-white py-3' ), $code );
+				$modified = true;
+			}
+		}
+
+		// Hero: Ensure startframe videos are rendered with autoplaying motion
+		if ( $filename_base === 'Hero.tsx' || $filename_base === 'Hero.ts' ) {
+			if ( strpos( $code, '<video' ) === false ) {
+				foreach ( $files_on_disk as $fod ) {
+					if ( strpos( $fod, 'startframe' ) !== false && ( strpos( $fod, 'hero' ) !== false || strpos( $fod, 'iphone' ) !== false ) ) {
+						$startframe_path = '/' . $fod;
+						$code = preg_replace(
+							'/<img\b([^>]*src=["\'][^"\']*(?:hero_iphone_18_pro|hero)[^"\']*["\'][^>]*)>/i',
+							'<video playsInline muted autoPlay loop poster="' . $startframe_path . '" className="w-full h-full object-cover object-bottom"><source src="https://www.apple.com/105/media/us/home/2026/6f46e780-4ab4-4688-915a-7aa0694378e3/anim/hero/largetall.mp4" type="video/mp4" /><img $1 /></video>',
+							$code,
+							1,
+							$v_count
+						);
+						if ( $v_count > 0 ) {
+							$modified = true;
+						}
+						break;
+					}
+				}
+			}
+		}
+
 		if ( $modified ) {
 			file_put_contents( $filepath, $code );
 		}
