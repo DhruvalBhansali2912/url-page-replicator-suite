@@ -732,7 +732,7 @@ function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_vi
 			$has_secondary_in_dom = ! empty( $raw_html ) && (
 				preg_match_all( '/<(?:section|div|ul)\b[^>]*?(?:data-[\w\-]*gallery|class=["\'][^"\']*(?:gallery|slider|carousel|swiper|splide|stream)[^"\']*)[^>]*>/i', $raw_html, $g_matches ) && count( $g_matches[0] ) >= 2
 			);
-			$has_secondary_in_code = ( substr_count( $code, 'const [' ) > 3 || strpos( $code, 'secondaryCards' ) !== false || strpos( $code, 'streamCards' ) !== false || strpos( $code, 'serviceCards' ) !== false );
+			$has_secondary_in_code = ( substr_count( $code, 'const [' ) > 3 || strpos( $code, 'const secondaryCards' ) !== false || strpos( $code, 'const streamCards' ) !== false || strpos( $code, 'const serviceCards' ) !== false );
 
 			if ( $has_secondary_in_dom && ! $has_secondary_in_code ) {
 				$secondary_cards = upr_transpiler_extract_secondary_gallery_cards( $raw_html, $files_on_disk );
@@ -740,6 +740,33 @@ function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_vi
 					$code = upr_transpiler_inject_secondary_gallery( $code, $secondary_cards );
 					$modified = true;
 				}
+			}
+
+			// Fail-safe: If secondaryCards is referenced in JSX but never declared, inject definition immediately
+			if ( strpos( $code, 'secondaryCards' ) !== false && strpos( $code, 'const secondaryCards' ) === false ) {
+				$secondary_cards = upr_transpiler_extract_secondary_gallery_cards( $raw_html, $files_on_disk );
+				if ( empty( $secondary_cards ) ) {
+					$secondary_cards = array();
+					$c_idx = 1;
+					$use_posters = ! empty( $poster_candidates ) ? array_slice( $poster_candidates, 0, 6 ) : array_slice( $files_on_disk, 0, 6 );
+					foreach ( $use_posters as $pc ) {
+						$secondary_cards[] = array(
+							'id'       => 'stream-' . $c_idx,
+							'category' => 'Featured',
+							'title'    => 'Featured Item ' . $c_idx,
+							'cta'      => 'Stream now',
+							'image'    => ( strpos( $pc, '/' ) === 0 ? $pc : '/' . $pc )
+						);
+						$c_idx++;
+					}
+				}
+				$cards_def = "\nconst secondaryCards = " . json_encode( $secondary_cards, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . ";\n";
+				if ( preg_match( '/\b(export\s+(?:default\s+)?function\s+Carousel|export\s+const\s+Carousel|function\s+Carousel|const\s+Carousel\b)/i', $code, $sm ) ) {
+					$code = str_replace( $sm[0], $cards_def . "\n" . $sm[0], $code );
+				} else {
+					$code = $cards_def . "\n" . $code;
+				}
+				$modified = true;
 			}
 		}
 
