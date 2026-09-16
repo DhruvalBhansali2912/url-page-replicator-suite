@@ -187,9 +187,33 @@ function upr_transpiler_scaffold_project( $target_path, $format, $title ) {
 			)
 		);
 
-		// Extract CSS keyframes from scraped stylesheets to preserve original animations
-		$keyframes_css = '';
+		// Bundle authentic scraped stylesheets into src/styles/scraped.css for 100% pixel-perfect layout
+		$styles_dir = $src_dir . '/styles';
+		if ( ! file_exists( $styles_dir ) ) {
+			wp_mkdir_p( $styles_dir );
+		}
+
+		$combined_css = "/* Bundled Authentic Site Stylesheets for Pixel-Perfect Layout */\n";
 		$css_files = glob( $raw_dir . '/*.css' );
+		if ( ! empty( $css_files ) ) {
+			foreach ( $css_files as $cf ) {
+				$css_content = file_get_contents( $cf );
+				// Normalize relative url(./...) or url('../...') to absolute / public asset paths safely
+				$css_content = preg_replace_callback( '/url\(\s*([\'"]?)([^\'")]+)\1\s*\)/i', function( $m ) {
+					$val = trim( $m[2] );
+					if ( preg_match( '/^(?:data:|https?:|\/\/|#|path\()/i', $val ) ) {
+						return $m[0];
+					}
+					$val = preg_replace( '/^\.{1,2}\//', '', $val );
+					return 'url("/' . ltrim( $val, '/' ) . '")';
+				}, $css_content );
+				$combined_css .= "\n/* --- " . basename( $cf ) . " --- */\n" . $css_content . "\n";
+			}
+		}
+		file_put_contents( $styles_dir . '/scraped.css', $combined_css );
+
+		// Extract CSS keyframes to ensure animations work in Tailwind environment
+		$keyframes_css = '';
 		if ( ! empty( $css_files ) ) {
 			foreach ( $css_files as $cf ) {
 				$css_content = file_get_contents( $cf );
@@ -228,8 +252,8 @@ function upr_transpiler_scaffold_project( $target_path, $format, $title ) {
 		// index.html
 		file_put_contents( $target_path . '/index.html', "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <link rel=\"icon\" type=\"image/x-icon\" href=\"/favicon.ico\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>" . esc_html( $title ) . "</title>\n  </head>\n  <body>\n    <div id=\"root\"></div>\n    <script type=\"module\" src=\"/src/main.tsx\"></script>\n  </body>\n</html>\n" );
 
-		// src/main.tsx
-		file_put_contents( $src_dir . '/main.tsx', "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\nimport './index.css';\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n" );
+		// src/main.tsx (loads authentic scraped.css for 100% pixel-perfect layout alongside index.css)
+		file_put_contents( $src_dir . '/main.tsx', "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\nimport './styles/scraped.css';\nimport './index.css';\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n" );
 
 		// fallback src/App.tsx
 		file_put_contents( $src_dir . '/App.tsx', "import React from 'react';\n\nexport function App() {\n  return (\n    <div className=\"min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 text-center\">\n      <h1 className=\"text-4xl font-bold text-gray-900 mb-2\">" . esc_html( $title ) . "</h1>\n      <p className=\"text-gray-600\">Replicated Modern Framework Project</p>\n    </div>\n  );\n}\n\nexport default App;\n" );
@@ -480,59 +504,44 @@ AVAILABLE LOCAL ASSETS (Stored in public/ - Reference directly with leading slas
 {$asset_manifest}
 
 CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES:
-1. EXACT LOCAL HERO & PROMO IMAGE BINDINGS (DO NOT GUESS OR USE RANDOM MD5 HASHES):
-   - Hero 1 (iPhone 18 Pro): Dark theme ('bg-black text-white'). Full-bleed background image: '/hero_iphone_18_pro_preorder__dd68unjbzswi_largetall_2x.jpg' (or '_large.jpg').
-   - Hero 2 (iPhone Duo): Light theme ('bg-[#f5f5f7] text-neutral-900'). Full-bleed background image of unfolded folding device held in hands: '/hero_iphone_duo_announce__fh4u8yzndpe2_largetall_2x.jpg' (or '_large.jpg'). NEVER repeat the Pro phone image here!
-   - Hero 3 (Apple Watch Series 12): Dark theme ('bg-black text-white'). Logo: '/hero_logo_apple_watch_series_12__eze8r897c5me_large_2x.png' (h-8 sm:h-11 object-contain mx-auto mb-2). Full-bleed background image: '/hero_apple_watch_series_12_preorder__cv2wd7ow8926_largetall_2x.jpg'.
-   - ALL 6 PROMO CARDS (MUST USE THESE EXACT NAMED ASSETS, NEVER RANDOM MD5 HASHES):
-     * Card 1 (Apple Watch Ultra 4, dark theme): Logo '/promo_logo_apple_watch_ultra_4__bc6ish8cjaeq_large_2x.png', subhead 'A battery you can\'t outrun.', callout 'Available starting 9.18', artwork '/promo_apple_watch_ultra_4_preorder__fvnta8sy0wa6_large_2x.jpg'.
-     * Card 2 (AirPods 5, dark theme): Title 'AirPods 5', subhead 'Discover the magic of Active Noise Cancellation.', callout 'Available starting 9.18', artwork '/promo_airpods_5_preorder__lydvte0llb6i_large_2x.jpg' (photo with warm backlight).
-     * Card 3 (iCloud+, light theme): Logo '/promo_logo_icloud_plus__5vu3k83czpey_large_2x.png', subhead 'Supercharge your iPhone with added storage, privacy features, and more.', artwork '/promo_icloud_plus__ge2cxxb5li2y_large_2x.jpg' (white iPhone in sky-blue clouds).
-     * Card 4 (MacBook Air, light theme): Title 'MacBook Air', subhead 'Now supercharged by M5.', artwork '/promo_macbook_air_m5__e5xk2yysqiie_large_2x.jpg' (two MacBook Air laptops in sky blue).
-     * Card 5 (Apple Upgrade, light theme): Logo '/promo_logo_apple_upgrade__lwuohffdzjem_large_2x.png', subhead 'Love it. Lease it. Upgrade it.', artwork '/promo_apple_upgrade__jvn6udm4tx2e_large_2x.jpg' (iPhone spectrum fan).
-     * Card 6 (Apple Card, light theme): Logo '/promo_logo_apple_card__28vxrcexz0ia_large_2x.png', subhead 'Get up to 3% Daily Cash back with every purchase.', artwork '/promo_apple_card__d8xz4kd4evwy_large_2x.jpg' (titanium card).
-2. HERO SECTIONS (FULL-BLEED APPLE HERO STYLING):
-   - Hero container: 'relative w-full h-[580px] sm:h-[640px] lg:h-[692px] overflow-hidden flex flex-col items-center justify-between text-center pt-12 sm:pt-14 pb-8 px-4 select-none'.
-   - Background image: '<img src=\"...\" alt=\"...\" className=\"absolute inset-0 w-full h-full object-cover object-bottom pointer-events-none transition-transform duration-700 hover:scale-[1.02]\" />'.
-   - Top text container: 'relative z-10 max-w-2xl mx-auto flex flex-col items-center' with headline ('text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight'), subhead ('text-xl sm:text-2xl mt-1.5 font-normal'), and pill CTAs ('bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 py-2 text-sm font-medium shadow-md active:scale-95', 'border border-blue-600 rounded-full px-5 py-2 text-sm font-medium active:scale-95').
-3. PROMO CARDS (FULL-BLEED EDGE-TO-EDGE ARTWORK):
-   - 2-column responsive grid on desktop: 'grid grid-cols-1 md:grid-cols-2 gap-3 max-w-[1280px] mx-auto px-4 my-3'.
-   - EVERY PROMO CARD MUST HAVE FULL-BLEED EDGE-TO-EDGE BACKGROUND ARTWORK:
-     Outer container: 'relative min-h-[560px] rounded-3xl overflow-hidden flex flex-col justify-between items-center text-center p-8 bg-neutral-900 shadow-sm'.
-     Image element: '<img src=\"...\" alt=\"...\" className=\"absolute inset-0 w-full h-full object-cover object-center pointer-events-none hover:scale-105 transition-transform duration-700 ease-out\" />'.
-     Text overlay container: 'relative z-10 flex flex-col items-center max-w-sm pt-2' with title/logo, subhead, callout, and pill CTAs.
-4. MOBILE NAVIGATION (FULL-SCREEN DRAWER):
-   - In Navbar.tsx, implement a mobile drawer with useState(false) and hamburger toggle icons ('Menu' and 'X' from 'lucide-react').
-   - When opened on mobile, it MUST be a full-screen drawer: 'fixed inset-x-0 top-12 bottom-0 bg-neutral-950/95 backdrop-blur-2xl z-50 flex flex-col px-8 py-8 space-y-4 overflow-y-auto'.
-   - Links inside mobile drawer: 'text-2xl font-semibold text-neutral-200 hover:text-white transition-colors border-b border-neutral-800/80 pb-3 block'.
-5. DUAL CAROUSELS (src/components/Carousel.{$ext}):
-   - Implement BOTH carousels found in the Captured HTML under 'Endless entertainment':
-     A) **Carousel 1: Apple TV+ 3-Card Continuous Filmstrip Slider**:
-        - Shows **3 slides visible simultaneously** across the screen:
-          * Active center card: 'w-[65vw] max-w-[980px] h-[460px] lg:h-[540px] rounded-2xl shadow-2xl relative overflow-hidden flex-shrink-0 transition-all duration-700'.
-          * Left & right adjacent cards: 'w-[48vw] max-w-[700px] h-[460px] lg:h-[540px] opacity-40 hover:opacity-80 scale-95 hover:scale-100 rounded-2xl overflow-hidden flex-shrink-0 transition-all duration-700 cursor-pointer'.
-        - Track: 'flex items-center justify-center gap-6 transition-transform duration-700 ease-out'.
-        - Slide content: Full poster image covering card ('absolute inset-0 w-full h-full object-cover'), movie title/logo overlay, genre badge, 'Stream now' pill CTA with Play icon.
-        - Controls: Chevron buttons ('ChevronLeft', 'ChevronRight'), auto-advancing useEffect (4s), play/pause toggle ('Play', 'Pause'), and interactive expanding pagination pill dots.
-        - Slides: Widow's Bay, Severance, The Morning Show, Ted Lasso, Foundation (using real poster images from Captured HTML).
-     B) **Carousel 2: Stream Reel / Category Ribbon**:
-        - Horizontal scrolling card strip right below Carousel 1: 'flex gap-4 overflow-x-auto py-6 px-4 scrollbar-none'.
-        - Secondary thumbnail cards (Fitness+, Hello Kitty, Dolly Parton, etc.) with rounded corners and subtle hover zoom.
-6. COMPLETE FOOTER DIRECTORY (ALL 11 COLUMNS & LEGAL):
-   - In src/components/Footer.{$ext}, you MUST include the complete Apple directory exactly as captured in the DOM:
-     - All 11 directory columns: Shop and Learn, Apple Wallet, Account, Entertainment, Apple Store, For Business, For Education, For Healthcare, For Government, Apple Values, About Apple.
-     - Complete legal footnotes section at the top of the footer.
-     - Copyright notice ('Copyright © 2026 Apple Inc. All rights reserved.'), legal links ('Privacy Policy', 'Terms of Use', 'Sales and Refunds', 'Legal', 'Site Map'), and country selector ('United States').
-7. OUTPUT STRUCTURE:
-   - Output ONLY the UI components under 'src/':
-     * src/App.{$ext} (default export App, assembling Navbar, Hero, PromoGrid, Carousel, and Footer)
-     * src/components/Navbar.{$ext}
-     * src/components/Hero.{$ext}
-     * src/components/PromoGrid.{$ext}
-     * src/components/Carousel.{$ext}
-     * src/components/Footer.{$ext}
-   - Do NOT output config files (NO package.json, vite.config, tsconfig, or index.html).
-   - Output each file inside a markdown code block with '// FILE: path' on the very first line comment:
+1. AUTHENTIC STYLES & PIXEL-PERFECT FIDELITY:
+   - The project automatically bundles the site's authentic CSS in 'src/styles/scraped.css' (imported in main.tsx).
+   - In your JSX/TSX elements, PRESERVE authentic class names alongside Tailwind utility classes (e.g. className=\"<original-class> <tailwind-utilities>\"). This ensures computed card sizes, exact aspect ratios, original typography, margins, paddings, background colors, and keyframe animations render with 100% fidelity.
+   - Do NOT invent arbitrary background colors (like defaulting everything to dark or plain black) if the captured DOM or styles specify light, gradient, or themed backgrounds.
+
+2. ASSET & IMAGE ACCURACY:
+   - Carefully examine the Captured HTML and AVAILABLE LOCAL ASSETS list.
+   - Bind EVERY <img>, <picture>, and background image to the exact corresponding local asset path (with a leading slash, e.g. '/filename.jpg') found in that section of the Captured HTML.
+   - Never use external URLs, placeholder services, or random mismatched filenames.
+   - Ensure full-bleed hero and card artwork use 'w-full h-full object-cover' so images seamlessly fill their containers without distortion.
+
+3. MODULAR COMPONENT DECOMPOSITION:
+   - src/components/Navbar.{$ext}: Replicate the global header/nav with logo, primary navigation items, utility icons (Search, Cart/Bag, etc.), and a fully responsive mobile drawer using useState for toggling open/close with Lucide icons (Menu, X).
+   - src/components/Hero.{$ext}: Replicate the hero showcase section(s) with authentic headline typography, subtitles, CTA buttons, and background imagery matching the captured DOM.
+   - src/components/PromoGrid.{$ext}: Replicate the grid of featured promos, product cards, or content highlights matching the layout, card dimensions, and media from the captured DOM.
+   - src/components/Carousel.{$ext}: If the captured DOM contains carousels, sliders, or filmstrips:
+     * Implement active state with useState(0) for slide index.
+     * Include next/previous controls, interactive indicator dots/pills, and auto-advance with useEffect.
+     * Ensure slides render authentic images and typography captured in the DOM.
+   - src/components/Footer.{$ext}: Replicate the complete multi-column directory, category links, legal disclaimers, copyright notice, and locale/region selector exactly as captured in the DOM. Do NOT truncate or skip columns.
+   - src/App.{$ext}: Root component importing and cleanly composing Navbar, Hero, PromoGrid, Carousel, and Footer.
+
+4. INTERACTIVITY & BEST PRACTICES:
+   - Use Lucide icons where appropriate (e.g. Menu, X, ChevronLeft, ChevronRight, Play, Pause, Search).
+   - Ensure all components are fully typed with TypeScript and export both named and default exports if needed.
+   - Do NOT emit markdown or comments outside the designated code blocks.
+
+OUTPUT STRUCTURE:
+Output ONLY the UI components under 'src/':
+* src/App.{$ext} (default export App, assembling Navbar, Hero, PromoGrid, Carousel, and Footer)
+* src/components/Navbar.{$ext}
+* src/components/Hero.{$ext}
+* src/components/PromoGrid.{$ext}
+* src/components/Carousel.{$ext}
+* src/components/Footer.{$ext}
+
+Do NOT output config files (NO package.json, vite.config, tsconfig, or index.html).
+Output each file inside a markdown code block with '// FILE: path' on the very first line comment:
 
 ```{$ext}
 // FILE: src/components/Navbar.{$ext}
@@ -624,15 +633,17 @@ function upr_transpiler_query_gemini( $prompt, $api_keys = null, $json_mode = fa
 		return new WP_Error( 'upr_missing_gemini_key', 'No Gemini API keys configured. Please add an API key in settings.', array( 'status' => 500 ) );
 	}
 
-	// Models ordered by quality, speed, and active availability
+	// Prioritize 500 RPD Flash-Lite models first to preserve quota, then fall back to 20 RPD models
 	$candidate_models = array(
+		'gemini-3.5-flash-lite',
+		'gemini-3.1-flash-lite',
+		'gemini-2.5-flash-lite',
+		'gemini-2.0-flash-lite',
+		'gemini-flash-lite-latest',
 		'gemini-3.6-flash',
 		'gemini-3.5-flash',
 		'gemini-3.7-flash',
 		'gemini-3.8-flash',
-		'gemini-3.5-flash-lite',
-		'gemini-3.1-flash-lite',
-		'gemini-flash-lite-latest',
 		'gemini-flash-latest'
 	);
 
