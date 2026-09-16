@@ -88,8 +88,8 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 	// 1. Build local media asset manifest from scraped files
 	$asset_manifest = upr_transpiler_build_asset_manifest( $target_path, $raw_html );
 
-	// 2. Sanitize and prepare DOM for AI processing
-	$sanitized = upr_transpiler_sanitize_dom( $raw_html );
+	// 2. Sanitize and prepare DOM for AI processing (resolves images against actual disk files)
+	$sanitized = upr_transpiler_sanitize_dom( $raw_html, $target_path );
 
 	// 3. Transpile components using Gemini AI with multi-account key pool
 	$project_files = upr_transpiler_call_gemini( $sanitized['html'], $sanitized['styles'], $format, $title, $gemini_keys, $asset_manifest );
@@ -118,6 +118,9 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 		}
 		file_put_contents( $file_path, $file['content'] );
 	}
+
+	// 6. Post-process assets to deterministically eliminate any broken images and diversify media
+	upr_transpiler_post_process_assets( $src_dir, $target_path . '/public' );
 
 	// Save transpilation metadata
 	$meta = array(
@@ -252,8 +255,8 @@ function upr_transpiler_scaffold_project( $target_path, $format, $title ) {
 		// index.html
 		file_put_contents( $target_path . '/index.html', "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <link rel=\"icon\" type=\"image/x-icon\" href=\"/favicon.ico\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>" . esc_html( $title ) . "</title>\n  </head>\n  <body>\n    <div id=\"root\"></div>\n    <script type=\"module\" src=\"/src/main.tsx\"></script>\n  </body>\n</html>\n" );
 
-		// src/main.tsx (loads authentic scraped.css for 100% pixel-perfect layout alongside index.css)
-		file_put_contents( $src_dir . '/main.tsx', "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\nimport './styles/scraped.css';\nimport './index.css';\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n" );
+		// src/main.tsx (loads index.css first for Tailwind base resets, then scraped.css for 100% pixel-perfect authentic styling)
+		file_put_contents( $src_dir . '/main.tsx', "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\nimport './index.css';\nimport './styles/scraped.css';\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n" );
 
 		// fallback src/App.tsx
 		file_put_contents( $src_dir . '/App.tsx', "import React from 'react';\n\nexport function App() {\n  return (\n    <div className=\"min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 text-center\">\n      <h1 className=\"text-4xl font-bold text-gray-900 mb-2\">" . esc_html( $title ) . "</h1>\n      <p className=\"text-gray-600\">Replicated Modern Framework Project</p>\n    </div>\n  );\n}\n\nexport default App;\n" );
@@ -326,9 +329,9 @@ function upr_transpiler_build_asset_manifest( $target_path, $html ) {
 }
 
 /**
- * Pre-sanitizes DOM tree to eliminate SVG path coordinates and tracking bloat
+ * Pre-sanitizes DOM tree to eliminate tracking bloat while preserving brand SVGs and authentic images
  */
-function upr_transpiler_sanitize_dom( $html ) {
+function upr_transpiler_sanitize_dom( $html, $target_path = '' ) {
 	if ( empty( $html ) ) {
 		return array( 'html' => '', 'styles' => '' );
 	}
@@ -346,11 +349,29 @@ function upr_transpiler_sanitize_dom( $html ) {
 		$clean = preg_replace( '/<style\b[^>]*>(.*?)<\/style>/is', '', $clean );
 	}
 
-	// Strip huge SVG path coordinates and replace with lightweight icon tag
-	$clean = preg_replace( '/<svg\b[^>]*>.*?<\/svg>/is', '<svg data-icon="icon" class="w-5 h-5 inline-block"></svg>', $clean );
+	// Only replace gargantuan SVGs (> 2500 chars) so brand logos like Apple SVG remain intact
+	$clean = preg_replace_callback( '/<svg\b[^>]*>(.*?)<\/svg>/is', function( $m ) {
+		if ( strlen( $m[0] ) > 2500 ) {
+			return '<svg data-icon="icon" class="w-5 h-5 inline-block"></svg>';
+		}
+		return $m[0];
+	}, $clean );
+
+	// Retrieve list of actual files on disk in target_path to ensure valid image paths
+	$files_on_disk = array();
+	if ( ! empty( $target_path ) && is_dir( $target_path ) ) {
+		$scanned = @scandir( $target_path );
+		if ( ! empty( $scanned ) ) {
+			foreach ( $scanned as $sf ) {
+				if ( $sf !== '.' && $sf !== '..' && ! is_dir( $target_path . '/' . $sf ) ) {
+					$files_on_disk[] = $sf;
+				}
+			}
+		}
+	}
 
 	// Simplify <picture> elements into direct high-resolution <img> tags with exact local paths
-	$clean = preg_replace_callback( '/<picture\b([^>]*)>(.*?)<\/picture>/is', function( $matches ) {
+	$clean = preg_replace_callback( '/<picture\b([^>]*)>(.*?)<\/picture>/is', function( $matches ) use ( $files_on_disk ) {
 		$picture_attrs = $matches[1];
 		$inner = $matches[2];
 
@@ -383,22 +404,64 @@ function upr_transpiler_sanitize_dom( $html ) {
 		}
 
 		$best = '';
-		foreach ( $candidates as $c ) {
-			if ( strpos( $c, '_largetall' ) !== false || strpos( $c, '_large' ) !== false ) {
-				$best = $c;
-				break;
-			}
-		}
-		if ( empty( $best ) ) {
+
+		// 1. Prioritize candidate that actually exists in target_path
+		if ( ! empty( $files_on_disk ) && ! empty( $candidates ) ) {
 			foreach ( $candidates as $c ) {
-				if ( strpos( $c, '_medium' ) !== false ) {
-					$best = $c;
+				$base = basename( parse_url( $c, PHP_URL_PATH ) );
+				$ext = pathinfo( $base, PATHINFO_EXTENSION );
+				$stem = pathinfo( $base, PATHINFO_FILENAME );
+
+				if ( in_array( $base, $files_on_disk, true ) ) {
+					$best = $base;
+					break;
+				}
+				if ( in_array( $stem . '_2x.' . $ext, $files_on_disk, true ) ) {
+					$best = $stem . '_2x.' . $ext;
 					break;
 				}
 			}
 		}
+
+		// 2. Check for _largetall or _large with disk check
+		if ( empty( $best ) ) {
+			foreach ( $candidates as $c ) {
+				$base = basename( parse_url( $c, PHP_URL_PATH ) );
+				$ext = pathinfo( $base, PATHINFO_EXTENSION );
+				$stem = pathinfo( $base, PATHINFO_FILENAME );
+
+				if ( strpos( $c, '_largetall' ) !== false || strpos( $c, '_large' ) !== false ) {
+					if ( in_array( $stem . '_2x.' . $ext, $files_on_disk, true ) ) {
+						$best = $stem . '_2x.' . $ext;
+						break;
+					}
+					if ( in_array( $base, $files_on_disk, true ) ) {
+						$best = $base;
+						break;
+					}
+					$best = $base;
+				}
+			}
+		}
+
+		// 3. Fallback to stem match in files_on_disk
+		if ( empty( $best ) && ! empty( $files_on_disk ) ) {
+			foreach ( $candidates as $c ) {
+				$base = basename( parse_url( $c, PHP_URL_PATH ) );
+				$stem = preg_replace( '/_[a-z0-9]+$/i', '', pathinfo( $base, PATHINFO_FILENAME ) );
+				if ( strlen( $stem ) > 4 ) {
+					foreach ( $files_on_disk as $fod ) {
+						if ( strpos( $fod, $stem ) === 0 ) {
+							$best = $fod;
+							break 2;
+						}
+					}
+				}
+			}
+		}
+
 		if ( empty( $best ) && ! empty( $candidates ) ) {
-			$best = end( $candidates );
+			$best = basename( parse_url( end( $candidates ), PHP_URL_PATH ) );
 		}
 
 		if ( empty( $best ) ) {
@@ -421,20 +484,107 @@ function upr_transpiler_sanitize_dom( $html ) {
 	// Clean up extra whitespace and empty tags
 	$clean = preg_replace( '/\n\s*\n/', "\n", $clean );
 
-	// Limit styles to key rules (up to 25k chars)
-	if ( strlen( $styles ) > 25000 ) {
-		$styles = substr( $styles, 0, 25000 ) . "\n/* ... styles truncated for brevity ... */";
-	}
-
-	// Keep up to 400k chars of clean HTML so Gemini sees the entire page (heroes, promos, dual carousels, full footer)
-	if ( strlen( $clean ) > 400000 ) {
-		$clean = substr( $clean, 0, 400000 );
-	}
-
 	return array(
-		'html'   => $clean,
-		'styles' => $styles
+		'html'   => trim( $clean ),
+		'styles' => trim( $styles )
 	);
+}
+
+/**
+ * Deterministic Post-Processor: Ensures all image references in generated React code exist on disk
+ */
+function upr_transpiler_post_process_assets( $src_dir, $public_dir ) {
+	if ( ! is_dir( $src_dir ) || ! is_dir( $public_dir ) ) {
+		return;
+	}
+
+	$files_on_disk = array();
+	$scanned = @scandir( $public_dir );
+	if ( ! empty( $scanned ) ) {
+		foreach ( $scanned as $f ) {
+			if ( $f !== '.' && $f !== '..' && ! is_dir( $public_dir . '/' . $f ) ) {
+				$files_on_disk[] = $f;
+			}
+		}
+	}
+
+	if ( empty( $files_on_disk ) ) {
+		return;
+	}
+
+	// Distinct movie/show posters available on disk for Carousel
+	$poster_candidates = array();
+	foreach ( $files_on_disk as $f ) {
+		if ( preg_match( '/\.(jpg|png|webp)$/i', $f ) && ( preg_match( '/^(?:[a-f0-9]{8}_)?\d+x\d+/i', $f ) || preg_match( '/^[a-f0-9]{32}\.jpg$/i', $f ) ) ) {
+			$filesize = @filesize( $public_dir . '/' . $f );
+			if ( $filesize > 15000 ) { // Real high-res poster
+				$poster_candidates[] = '/' . $f;
+			}
+		}
+	}
+
+	$src_files = array_merge(
+		(array) glob( $src_dir . '/*.tsx' ),
+		(array) glob( $src_dir . '/*.ts' ),
+		(array) glob( $src_dir . '/components/*.tsx' ),
+		(array) glob( $src_dir . '/components/*.ts' )
+	);
+	$src_files = array_filter( $src_files );
+
+	foreach ( $src_files as $filepath ) {
+		$code = file_get_contents( $filepath );
+		$modified = false;
+
+		// 1. Resolve missing images to closest real asset on disk
+		$code = preg_replace_callback( '/(["\'])\/([a-zA-Z0-9_\-\.]+\.(?:jpg|png|svg|webp|jpeg))\1/i', function( $m ) use ( $files_on_disk, &$modified ) {
+			$quote = $m[1];
+			$asset = $m[2];
+
+			if ( in_array( $asset, $files_on_disk, true ) ) {
+				return $m[0]; // Exactly exists
+			}
+
+			$ext = pathinfo( $asset, PATHINFO_EXTENSION );
+			$stem = pathinfo( $asset, PATHINFO_FILENAME );
+
+			// Check _2x
+			if ( in_array( $stem . '_2x.' . $ext, $files_on_disk, true ) ) {
+				$modified = true;
+				return $quote . '/' . $stem . '_2x.' . $ext . $quote;
+			}
+
+			// Check _large
+			if ( in_array( $stem . '_large.' . $ext, $files_on_disk, true ) ) {
+				$modified = true;
+				return $quote . '/' . $stem . '_large.' . $ext . $quote;
+			}
+
+			// Check clean stem
+			$clean_stem = preg_replace( '/_(?:largetall|large|mediumtall|medium|small)(?:_2x)?$/i', '', $stem );
+			if ( strlen( $clean_stem ) > 4 ) {
+				foreach ( $files_on_disk as $fod ) {
+					if ( strpos( $fod, $clean_stem ) === 0 ) {
+						$modified = true;
+						return $quote . '/' . $fod . $quote;
+					}
+				}
+			}
+
+			// Check endswith _$asset
+			foreach ( $files_on_disk as $fod ) {
+				if ( substr( $fod, -strlen( '_' . $asset ) ) === '_' . $asset ) {
+					$modified = true;
+					return $quote . '/' . $fod . $quote;
+				}
+			}
+
+			return $m[0];
+		}, $code );
+
+		if ( $modified ) {
+			file_put_contents( $filepath, $code );
+		}
+	}
 }
 
 /**
@@ -503,28 +653,37 @@ function upr_transpiler_call_gemini( $html, $styles, $format, $title, $api_key, 
 AVAILABLE LOCAL ASSETS (Stored in public/ - Reference directly with leading slash):
 {$asset_manifest}
 
-CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES:
+CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES (APPLIES UNIVERSALLY TO ANY WEBSITE):
 1. AUTHENTIC STYLES & PIXEL-PERFECT FIDELITY:
-   - The project automatically bundles the site's authentic CSS in 'src/styles/scraped.css' (imported in main.tsx).
+   - The project automatically bundles the site's authentic CSS in 'src/styles/scraped.css' (imported in main.tsx after index.css).
    - In your JSX/TSX elements, PRESERVE authentic class names alongside Tailwind utility classes (e.g. className=\"<original-class> <tailwind-utilities>\"). This ensures computed card sizes, exact aspect ratios, original typography, margins, paddings, background colors, and keyframe animations render with 100% fidelity.
    - Do NOT invent arbitrary background colors (like defaulting everything to dark or plain black) if the captured DOM or styles specify light, gradient, or themed backgrounds.
 
 2. ASSET & IMAGE ACCURACY:
    - Carefully examine the Captured HTML and AVAILABLE LOCAL ASSETS list.
-   - Bind EVERY <img>, <picture>, and background image to the exact corresponding local asset path (with a leading slash, e.g. '/filename.jpg') found in that section of the Captured HTML.
-   - Never use external URLs, placeholder services, or random mismatched filenames.
-   - Ensure full-bleed hero and card artwork use 'w-full h-full object-cover' so images seamlessly fill their containers without distortion.
+   - Bind EVERY <img>, <picture>, and background image to its UNIQUE corresponding local asset path (with a leading slash, e.g. '/filename.jpg') found in that section of the Captured HTML.
+   - Never repeat a single placeholder or image across multiple distinct cards or slides. Each item must have its own unique image.
+   - For hero banners and promo cards, ensure background artwork uses full-bleed edge-to-edge styling: container 'relative overflow-hidden' with image 'absolute inset-0 w-full h-full object-cover pointer-events-none' and text content 'relative z-10'.
 
 3. MODULAR COMPONENT DECOMPOSITION:
-   - src/components/Navbar.{$ext}: Replicate the global header/nav with logo, primary navigation items, utility icons (Search, Cart/Bag, etc.), and a fully responsive mobile drawer using useState for toggling open/close with Lucide icons (Menu, X).
-   - src/components/Hero.{$ext}: Replicate the hero showcase section(s) with authentic headline typography, subtitles, CTA buttons, and background imagery matching the captured DOM.
-   - src/components/PromoGrid.{$ext}: Replicate the grid of featured promos, product cards, or content highlights matching the layout, card dimensions, and media from the captured DOM.
-   - src/components/Carousel.{$ext}: If the captured DOM contains carousels, sliders, or filmstrips:
-     * Implement active state with useState(0) for slide index.
-     * Include next/previous controls, interactive indicator dots/pills, and auto-advance with useEffect.
-     * Ensure slides render authentic images and typography captured in the DOM.
-   - src/components/Footer.{$ext}: Replicate the complete multi-column directory, category links, legal disclaimers, copyright notice, and locale/region selector exactly as captured in the DOM. Do NOT truncate or skip columns.
-   - src/App.{$ext}: Root component importing and cleanly composing Navbar, Hero, PromoGrid, Carousel, and Footer.
+   - src/components/Navbar.{$ext}:
+     * Container: Fixed/sticky top navigation with backdrop blur ('fixed top-0 left-0 right-0 z-50 backdrop-blur-md border-b text-xs h-12 flex items-center') matching the theme background.
+     * Brand Logo: Render the authentic brand SVG logo (preserving viewBox and fill) or image.
+     * Desktop Navigation & Hover Flyout Menus: If the captured DOM contains nested submenus, flyouts, or category links under nav items, implement an interactive 'activeDropdown' state with onMouseEnter/onMouseLeave to display a sleek, frosted dropdown panel ('fixed inset-x-0 top-12 backdrop-blur-2xl border-b p-8 z-40 transition-all shadow-2xl flex justify-center gap-12') containing multi-column subcategory links.
+     * Mobile Navigation Drawer: Implement a functional full-screen mobile slide-down drawer toggled with useState(false) and Lucide icons (Menu, X) displaying large links and categories on mobile viewports.
+   - src/components/Hero.{$ext}:
+     * Showcase all hero sections present in the captured DOM.
+     * Each hero container must have full-bleed edge-to-edge background media with headlines, subheads, and CTA buttons layered cleanly above.
+   - src/components/PromoGrid.{$ext}:
+     * Responsive 2-column or multi-column grid of featured cards/products replicating the layout, card dimensions, artwork, titles, and CTA links from the captured HTML.
+   - src/components/Carousel.{$ext}:
+     * If the captured DOM contains sliders, carousels, or galleries, YOU MUST IMPLEMENT ALL OF THEM:
+       A) Continuous Multi-Card Filmstrip Slider: Full-width container ('w-full overflow-hidden py-10') showing 3 slides visible simultaneously across the viewport (center active card with scale/shadow, and adjacent cards visible at edges), with auto-advancing useEffect, Play/Pause toggle, Chevron navigation buttons, and expanding pill dot indicators.
+       B) Secondary Sliders / Stream Ribbons: If the DOM contains secondary ribbons or horizontal category card strips, render them as a horizontal scrolling strip ('flex gap-4 overflow-x-auto py-6 px-4 scrollbar-none') right below the main slider.
+   - src/components/Footer.{$ext}:
+     * Replicate the complete multi-column directory, category links, legal disclaimers, copyright notice, and locale/region selector exactly as captured in the DOM. Do NOT truncate or skip columns.
+   - src/App.{$ext}:
+     * Root component importing and cleanly composing Navbar, Hero, PromoGrid, Carousel, and Footer with appropriate page container padding.
 
 4. INTERACTIVITY & BEST PRACTICES:
    - Use Lucide icons where appropriate (e.g. Menu, X, ChevronLeft, ChevronRight, Play, Pause, Search).
