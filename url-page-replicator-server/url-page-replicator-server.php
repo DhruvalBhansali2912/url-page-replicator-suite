@@ -15,7 +15,7 @@ define( 'UPR_SERVER_URL', plugin_dir_url( __FILE__ ) );
 
 // Hardcoded Gemini API Key (pre-configured for deployment)
 if ( ! defined( 'UPR_GEMINI_API_KEY' ) ) {
-	define( 'UPR_GEMINI_API_KEY', '' ); // <-- Paste your Gemini API key here or configure via WP Admin settings
+	define( 'UPR_GEMINI_API_KEY', '' ); // <-- Paste your Gemini API key here or configure via WP Admin settings // <-- Paste your Gemini API key here
 }
 
 // Handle CORS Preflight OPTIONS Requests early

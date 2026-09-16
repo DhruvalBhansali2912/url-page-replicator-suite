@@ -255,8 +255,8 @@ function upr_transpiler_scaffold_project( $target_path, $format, $title ) {
 		// index.html
 		file_put_contents( $target_path . '/index.html', "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <link rel=\"icon\" type=\"image/x-icon\" href=\"/favicon.ico\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>" . esc_html( $title ) . "</title>\n  </head>\n  <body>\n    <div id=\"root\"></div>\n    <script type=\"module\" src=\"/src/main.tsx\"></script>\n  </body>\n</html>\n" );
 
-		// src/main.tsx (loads index.css first for Tailwind base resets, then scraped.css for 100% pixel-perfect authentic styling)
-		file_put_contents( $src_dir . '/main.tsx', "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\nimport './index.css';\nimport './styles/scraped.css';\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n" );
+		// src/main.tsx (loads index.css for Tailwind resets and keyframe animations)
+		file_put_contents( $src_dir . '/main.tsx', "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\nimport './index.css';\n\nReactDOM.createRoot(document.getElementById('root')!).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n" );
 
 		// fallback src/App.tsx
 		file_put_contents( $src_dir . '/App.tsx', "import React from 'react';\n\nexport function App() {\n  return (\n    <div className=\"min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 text-center\">\n      <h1 className=\"text-4xl font-bold text-gray-900 mb-2\">" . esc_html( $title ) . "</h1>\n      <p className=\"text-gray-600\">Replicated Modern Framework Project</p>\n    </div>\n  );\n}\n\nexport default App;\n" );
@@ -654,18 +654,23 @@ AVAILABLE LOCAL ASSETS (Stored in public/ - Reference directly with leading slas
 {$asset_manifest}
 
 CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES (APPLIES UNIVERSALLY TO ANY WEBSITE):
-1. AUTHENTIC STYLES & PIXEL-PERFECT FIDELITY:
-   - The project automatically bundles the site's authentic CSS in 'src/styles/scraped.css' (imported in main.tsx after index.css).
-   - In your JSX/TSX elements, PRESERVE authentic class names alongside Tailwind utility classes (e.g. className=\"<original-class> <tailwind-utilities>\"). This ensures computed card sizes, exact aspect ratios, original typography, margins, paddings, background colors, and keyframe animations render with 100% fidelity.
-   - Do NOT invent arbitrary background colors (like defaulting everything to dark or plain black) if the captured DOM or styles specify light, gradient, or themed backgrounds.
+1. PURE TAILWIND STYLING & ZERO EXTERNAL CSS CONFLICTS:
+   - Style all component layouts, responsive grids, flex directions, typography, spacing, and sizing ENTIRELY using self-contained Tailwind CSS utility classes.
+   - Do NOT rely on legacy scraped classes (such as '.button', '.tile-content', or '.headline') for layout or positioning, as modern framework projects rely strictly on Tailwind resets and extracted keyframes.
+   - Replicate the authentic dark/light themes, exact card background colors, and typography contrast from the captured DOM. Do NOT invent arbitrary background colors.
 
-2. ASSET & IMAGE ACCURACY:
+2. HERO & PROMO CARD BUTTON GEOMETRY (CRITICAL - PREVENT OVERLAPPING ARTWORK):
+   - In Hero sections and Promo cards featuring product artwork or background imagery, ALWAYS keep the CTA buttons grouped together with the headline, subhead, and callout in the top content block (e.g. 'relative z-10 flex flex-col items-center pt-12 gap-3 text-center').
+   - NEVER use 'justify-between' or push CTA buttons to the absolute bottom of cards where they collide with or cover product art, watch faces, phone bodies, or illustrations.
+   - The CTA buttons must sit cleanly immediately below the subhead/callout, leaving the entire lower half of the card open for the background artwork.
+
+3. ASSET & IMAGE ACCURACY:
    - Carefully examine the Captured HTML and AVAILABLE LOCAL ASSETS list.
    - Bind EVERY <img>, <picture>, and background image to its UNIQUE corresponding local asset path (with a leading slash, e.g. '/filename.jpg') found in that section of the Captured HTML.
    - Never repeat a single placeholder or image across multiple distinct cards or slides. Each item must have its own unique image.
    - For hero banners and promo cards, ensure background artwork uses full-bleed edge-to-edge styling: container 'relative overflow-hidden' with image 'absolute inset-0 w-full h-full object-cover pointer-events-none' and text content 'relative z-10'.
 
-3. MODULAR COMPONENT DECOMPOSITION:
+4. MODULAR COMPONENT DECOMPOSITION:
    - src/components/Navbar.{$ext}:
      * Container: Fixed/sticky top navigation with backdrop blur ('fixed top-0 left-0 right-0 z-50 backdrop-blur-md border-b text-xs h-12 flex items-center') matching the theme background.
      * Brand Logo: Render the authentic brand SVG logo (preserving viewBox and fill) or image.
@@ -673,19 +678,19 @@ CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES (APPLIES UNIVERSALLY TO ANY WEBSITE
      * Mobile Navigation Drawer: Implement a functional full-screen mobile slide-down drawer toggled with useState(false) and Lucide icons (Menu, X) displaying large links and categories on mobile viewports.
    - src/components/Hero.{$ext}:
      * Showcase all hero sections present in the captured DOM.
-     * Each hero container must have full-bleed edge-to-edge background media with headlines, subheads, and CTA buttons layered cleanly above.
+     * Each hero container must have full-bleed edge-to-edge background media with headlines, subheads, and CTA buttons clustered cleanly above.
    - src/components/PromoGrid.{$ext}:
-     * Responsive 2-column or multi-column grid of featured cards/products replicating the layout, card dimensions, artwork, titles, and CTA links from the captured HTML.
+     * Responsive 2-column or multi-column grid of featured cards/products replicating the layout, card dimensions, artwork, titles, and CTA links from the captured HTML. Keep CTAs clustered at the top with titles.
    - src/components/Carousel.{$ext}:
      * If the captured DOM contains sliders, carousels, or galleries, YOU MUST IMPLEMENT ALL OF THEM:
        A) Continuous Multi-Card Filmstrip Slider: Full-width container ('w-full overflow-hidden py-10') showing 3 slides visible simultaneously across the viewport (center active card with scale/shadow, and adjacent cards visible at edges), with auto-advancing useEffect, Play/Pause toggle, Chevron navigation buttons, and expanding pill dot indicators.
        B) Secondary Sliders / Stream Ribbons: If the DOM contains secondary ribbons or horizontal category card strips, render them as a horizontal scrolling strip ('flex gap-4 overflow-x-auto py-6 px-4 scrollbar-none') right below the main slider.
    - src/components/Footer.{$ext}:
-     * Replicate the complete multi-column directory, category links, legal disclaimers, copyright notice, and locale/region selector exactly as captured in the DOM. Do NOT truncate or skip columns.
+     * Replicate the complete multi-column directory, category links, legal disclaimers, copyright notice, and locale/region selector exactly as captured in the DOM into responsive grid columns ('grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-8'). Do NOT truncate or squash columns.
    - src/App.{$ext}:
      * Root component importing and cleanly composing Navbar, Hero, PromoGrid, Carousel, and Footer with appropriate page container padding.
 
-4. INTERACTIVITY & BEST PRACTICES:
+5. INTERACTIVITY & BEST PRACTICES:
    - Use Lucide icons where appropriate (e.g. Menu, X, ChevronLeft, ChevronRight, Play, Pause, Search).
    - Ensure all components are fully typed with TypeScript and export both named and default exports if needed.
    - Do NOT emit markdown or comments outside the designated code blocks.
