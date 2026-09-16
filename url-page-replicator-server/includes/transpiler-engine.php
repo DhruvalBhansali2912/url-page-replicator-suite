@@ -8,6 +8,30 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+require_once dirname( __FILE__ ) . '/css-to-tailwind-engine.php';
+
+if ( ! function_exists( 'sanitize_title' ) ) {
+	function sanitize_title( $title ) {
+		return preg_replace( '/[^a-z0-9_-]/', '-', strtolower( trim( $title ) ) );
+	}
+}
+if ( ! function_exists( 'esc_html' ) ) {
+	function esc_html( $text ) {
+		return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
+	}
+}
+if ( ! function_exists( 'esc_attr' ) ) {
+	function esc_attr( $text ) {
+		return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
+	}
+}
+if ( ! function_exists( 'esc_url' ) ) {
+	function esc_url( $url ) {
+		return $url;
+	}
+}
+
+
 /**
  * Resolves Gemini API key with priority:
  * 1. Hardcoded PHP constant UPR_GEMINI_API_KEY
@@ -91,6 +115,24 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 	// 2. Sanitize and prepare DOM for AI processing (resolves images against actual disk files)
 	$sanitized = upr_transpiler_sanitize_dom( $raw_html, $target_path );
 
+	// 2b. Collect authentic site CSS rules and annotate DOM with deterministic Tailwind classes (Zero Hardcoding)
+	$combined_site_css = '';
+	$scanned_css = glob( $target_path . '/*.css' );
+	if ( empty( $scanned_css ) ) {
+		$scanned_css = glob( $target_path . '/raw_scraped/*.css' );
+	}
+	if ( ! empty( $scanned_css ) ) {
+		foreach ( $scanned_css as $scf ) {
+			$combined_site_css .= file_get_contents( $scf ) . "\n";
+		}
+	}
+	if ( ! empty( $sanitized['styles'] ) ) {
+		$combined_site_css .= "\n" . $sanitized['styles'];
+	}
+	if ( ! empty( $combined_site_css ) && function_exists( 'upr_annotate_html_with_tailwind' ) ) {
+		$sanitized['html'] = upr_annotate_html_with_tailwind( $sanitized['html'], $combined_site_css );
+	}
+
 	// 3. Transpile components using Gemini AI with multi-account key pool
 	$project_files = upr_transpiler_call_gemini( $sanitized['html'], $sanitized['styles'], $format, $title, $gemini_keys, $asset_manifest );
 	if ( is_wp_error( $project_files ) ) {
@@ -117,6 +159,11 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 			wp_mkdir_p( $dir );
 		}
 		file_put_contents( $file_path, $file['content'] );
+	}
+
+	// For html-clean format: Assemble complete, standalone runnable index.html with styles and assets
+	if ( $format === 'html-clean' ) {
+		upr_transpiler_assemble_clean_html( $target_path, $title );
 	}
 
 	// 6. Extract any video media from raw captured HTML dynamically for ANY website
@@ -288,6 +335,25 @@ function upr_transpiler_scaffold_project( $target_path, $format, $title ) {
 
 		// fallback src/App.tsx
 		file_put_contents( $src_dir . '/App.tsx', "import React from 'react';\n\nexport function App() {\n  return (\n    <div className=\"min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 text-center\">\n      <h1 className=\"text-4xl font-bold text-gray-900 mb-2\">" . esc_html( $title ) . "</h1>\n      <p className=\"text-gray-600\">Replicated Modern Framework Project</p>\n    </div>\n  );\n}\n\nexport default App;\n" );
+	} elseif ( $format === 'html-clean' ) {
+		// Bundle authentic site CSS into styles.css at target_path root
+		$combined_css = "/* Bundled Authentic Site Stylesheets */\n";
+		$css_files = glob( $raw_dir . '/*.css' );
+		if ( ! empty( $css_files ) ) {
+			foreach ( $css_files as $cf ) {
+				$css_content = file_get_contents( $cf );
+				$css_content = preg_replace_callback( '/url\(\s*([\'"]?)([^\'")]+)\1\s*\)/i', function( $m ) {
+					$val = trim( $m[2] );
+					if ( preg_match( '/^(?:data:|https?:|\/\/|#|path\()/i', $val ) ) {
+						return $m[0];
+					}
+					$val = preg_replace( '/^\.{1,2}\//', '', $val );
+					return 'url("./public/' . ltrim( $val, '/' ) . '")';
+				}, $css_content );
+				$combined_css .= "\n/* --- " . basename( $cf ) . " --- */\n" . $css_content . "\n";
+			}
+		}
+		file_put_contents( $target_path . '/styles.css', $combined_css );
 	}
 }
 
@@ -710,7 +776,7 @@ function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_vi
 				// Universally wrap primary hero visual image with the authentic video element (handles multiline attributes & self-closing tags)
 				$code = preg_replace(
 					'/<img\b([^>]*?className=["\'][^"\']*(?:w-full|object-cover|hero)[^"\']*(?:[^>]*?))\s*\/?>/is',
-					'<video playsInline muted autoPlay loop' . $poster_attr . ' className="w-full h-full object-cover object-bottom"><source src="' . $v_src . '" type="video/mp4" /><img $1 /></video>',
+					'<video playsInline muted autoPlay' . $poster_attr . ' className="w-full h-full object-cover object-bottom"><source src="' . $v_src . '" type="video/mp4" /><img $1 /></video>',
 					$code,
 					1,
 					$v_count
@@ -856,20 +922,22 @@ function upr_transpiler_inject_secondary_gallery( $code, $cards, $section_title 
           {secondaryCards.map((card) => (
             <div
               key={card.id}
-              className="flex-shrink-0 w-[280px] md:w-[320px] h-[360px] md:h-[400px] rounded-2xl overflow-hidden relative group bg-[#161617] border border-white/10 flex flex-col justify-end p-6"
+              className="flex-shrink-0 w-[360px] md:w-[416px] h-[210px] md:h-[240px] aspect-video rounded-2xl overflow-hidden relative group bg-[#161617] border border-white/10 flex flex-col justify-between p-5"
             >
               <div className="absolute inset-0 z-0">
                 <img src={card.image} alt={card.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
               </div>
-              <div className="relative z-10 flex flex-col items-start space-y-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[#2997ff] bg-black/40 px-2.5 py-1 rounded-full backdrop-blur-md">
+              <div className="relative z-10 flex justify-end w-full">
+                <span className="text-xs font-semibold uppercase tracking-wider text-white bg-black/50 px-2.5 py-1 rounded-full backdrop-blur-md">
                   {card.category}
                 </span>
-                <p className="text-base md:text-lg font-semibold text-white leading-snug line-clamp-2">
+              </div>
+              <div className="relative z-10 flex items-center justify-between w-full gap-3">
+                <p className="text-base md:text-lg font-semibold text-white leading-snug line-clamp-1 truncate flex-1">
                   {card.title}
                 </p>
-                <div className="bg-white text-black px-4 py-1.5 rounded-full text-xs font-medium hover:bg-white/90 transition-colors mt-2">
+                <div className="bg-white text-black px-4 py-1.5 rounded-full text-xs font-medium hover:bg-white/90 transition-colors flex-shrink-0">
                   {card.cta}
                 </div>
               </div>
@@ -975,7 +1043,7 @@ CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES (APPLIES UNIVERSALLY TO ANY WEBSITE
      * Container: Fixed/sticky top navigation with backdrop blur ('fixed top-0 left-0 right-0 z-50 backdrop-blur-md border-b text-xs h-12 flex items-center') matching the theme background.
      * Brand Logo: Render the authentic brand SVG logo (preserving viewBox and fill) or image.
      * Desktop Navigation & Hover Flyout Menus: If the captured DOM contains nested submenus, flyouts, or category links under nav items, implement an interactive 'activeDropdown' state with onMouseEnter/onMouseLeave to display a sleek, frosted dropdown panel ('fixed inset-x-0 top-12 backdrop-blur-2xl border-b p-8 z-40 transition-all shadow-2xl flex justify-center gap-12') containing multi-column subcategory links.
-     * Full-Height Mobile Navigation Drawer: Implement a functional full-height mobile slide-down drawer toggled with useState(false) and Lucide icons (Menu, X) occupying the entire viewport height ('fixed inset-0 top-12 bg-[#f5f5f7] z-50 h-[calc(100vh-48px)] flex flex-col px-8 pt-6 pb-12 overflow-y-auto') displaying a clean search bar and large category links ('text-[26px] font-semibold text-[#1d1d1f] hover:text-[#0071e3] transition-colors py-3 border-b border-black/5') with chevron indicators.
+     * Full-Height Mobile Navigation Drawer: Implement an authentic full-height mobile overlay toggled with useState(false) and Lucide icons (Menu, X) occupying the viewport ('fixed inset-0 top-12 bg-[#f5f5f7] z-50 h-[calc(100vh-48px)] flex flex-col px-8 pt-6 pb-12 overflow-y-auto') displaying large category navigation links ('text-[28px] font-semibold text-[#1d1d1f] hover:text-[#0071e3] transition-colors py-3'). Preserve ONLY links and controls present in the captured DOM; do NOT invent search inputs, chevron indicators (>), or divider borders.
    - src/components/Hero.{$ext}:
      * Showcase all hero sections present in the captured DOM.
      * Render opening video/animation for heroes that have animated motion.
@@ -1183,4 +1251,57 @@ function upr_transpiler_query_gemini( $prompt, $api_keys = null, $json_mode = fa
 	}
 
 	return new WP_Error( 'upr_gemini_error', $last_error, array( 'status' => 500 ) );
+}
+
+
+/**
+ * Assembles modular HTML components into a standalone, runnable root index.html
+ */
+function upr_transpiler_assemble_clean_html( $target_path, $title = 'Replicated Page' ) {
+	$app_html_path = $target_path . '/src/App.html';
+	$comp_dir = $target_path . '/src/components';
+	$root_index = $target_path . '/index.html';
+
+	$base_html = '';
+	if ( file_exists( $app_html_path ) ) {
+		$base_html = file_get_contents( $app_html_path );
+	}
+
+	// Resolve component imports: <!-- @import src/components/... -->
+	if ( ! empty( $base_html ) ) {
+		$base_html = preg_replace_callback( '/<!--\s*@import\s+([\w\-\.\/]+)\s*-->/i', function( $m ) use ( $target_path ) {
+			$rel = ltrim( $m[1], '/' );
+			$full = $target_path . '/' . $rel;
+			if ( file_exists( $full ) ) {
+				return "\n" . file_get_contents( $full ) . "\n";
+			}
+			return $m[0];
+		}, $base_html );
+	}
+
+	// If App.html was empty or didn't contain full markup, assemble from available components
+	if ( empty( $base_html ) || strlen( $base_html ) < 100 ) {
+		$comp_order = array( 'Navbar.html', 'Hero.html', 'PromoGrid.html', 'Carousel.html', 'Footer.html' );
+		$body_parts = array();
+		foreach ( $comp_order as $co ) {
+			$cp = $comp_dir . '/' . $co;
+			if ( file_exists( $cp ) ) {
+				$body_parts[] = file_get_contents( $cp );
+			}
+		}
+		$base_html = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>" . esc_html( $title ) . "</title>\n  <link rel=\"stylesheet\" href=\"./styles.css\">\n  <script src=\"https://cdn.tailwindcss.com\"></script>\n</head>\n<body class=\"bg-black text-white antialiased\">\n" . implode( "\n", $body_parts ) . "\n</body>\n</html>";
+	}
+
+	// Ensure styles.css and Tailwind CDN are included in <head>
+	if ( strpos( $base_html, 'styles.css' ) === false && strpos( $base_html, '</head>' ) !== false ) {
+		$base_html = str_replace( '</head>', "  <link rel=\"stylesheet\" href=\"./styles.css\">\n</head>", $base_html );
+	}
+	if ( strpos( $base_html, 'cdn.tailwindcss.com' ) === false && strpos( $base_html, '</head>' ) !== false ) {
+		$base_html = str_replace( '</head>', "  <script src=\"https://cdn.tailwindcss.com\"></script>\n</head>", $base_html );
+	}
+
+	// Normalize asset paths so opening index.html directly in a browser loads all images
+	$base_html = preg_replace( '/(["\'])\/(?:public\/)?([a-zA-Z0-9_\-\.]+\.(?:jpg|jpeg|png|gif|svg|webp|mp4|webm))\1/i', '$1./public/$2$1', $base_html );
+
+	file_put_contents( $root_index, $base_html );
 }
