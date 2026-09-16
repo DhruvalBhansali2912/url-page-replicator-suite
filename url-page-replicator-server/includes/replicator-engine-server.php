@@ -565,7 +565,7 @@ function uprs_process_webpage( $html, $base_url, $target_path, $target_url ) {
 		$title = $title_tags->item( 0 )->nodeValue;
 	}
 
-	// 0. Fix no-js class (Apple.com and modern sites hide navigation/animations if no-js is present)
+	// 0. Fix no-js class (modern sites hide navigation/animations if no-js is present)
 	$html_tags = $dom->getElementsByTagName( 'html' );
 	if ( $html_tags->length > 0 ) {
 		$html_el = $html_tags->item( 0 );
@@ -575,12 +575,13 @@ function uprs_process_webpage( $html, $base_url, $target_path, $target_url ) {
 		}
 	}
 	$xpath = new DOMXPath( $dom );
-	$globalnav_nodes = $xpath->query( '//*[@id="globalnav"]' );
-	if ( $globalnav_nodes && $globalnav_nodes->length > 0 ) {
-		$nav_el = $globalnav_nodes->item( 0 );
-		$nav_class = $nav_el->getAttribute( 'class' );
-		if ( strpos( $nav_class, 'no-js' ) !== false ) {
-			$nav_el->setAttribute( 'class', preg_replace( '/\bno-js\b/', 'js', $nav_class ) );
+	$nav_nodes = $xpath->query( '//*[@id="globalnav" or @id="navigation" or @id="nav" or contains(@class, "nav") or contains(@class, "header")]' );
+	if ( $nav_nodes && $nav_nodes->length > 0 ) {
+		foreach ( $nav_nodes as $nav_el ) {
+			$nav_class = $nav_el->getAttribute( 'class' );
+			if ( ! empty( $nav_class ) && strpos( $nav_class, 'no-js' ) !== false ) {
+				$nav_el->setAttribute( 'class', preg_replace( '/\bno-js\b/', 'js', $nav_class ) );
+			}
 		}
 	}
 

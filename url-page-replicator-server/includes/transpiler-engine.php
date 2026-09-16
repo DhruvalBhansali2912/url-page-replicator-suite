@@ -119,8 +119,36 @@ function upr_server_transpile_page( $target_path, $compilation_id, $format, $tit
 		file_put_contents( $file_path, $file['content'] );
 	}
 
-	// 6. Post-process assets to deterministically eliminate any broken images and diversify media
-	upr_transpiler_post_process_assets( $src_dir, $target_path . '/public' );
+	// 6. Extract any video media from raw captured HTML dynamically for ANY website
+	$detected_videos = array();
+	if ( preg_match_all( '/<video\b([^>]*)>(.*?)<\/video>/is', $raw_html, $video_matches, PREG_SET_ORDER ) ) {
+		foreach ( $video_matches as $vm ) {
+			$v_attrs = $vm[1];
+			$v_inner = $vm[2];
+			$v_src = '';
+			if ( preg_match( '/src=["\']([^"\']+)["\']/i', $v_attrs, $sm ) ) {
+				$v_src = $sm[1];
+			} elseif ( preg_match( '/<source[^>]+src=["\']([^"\']+)["\']/i', $v_inner, $sm ) ) {
+				$v_src = $sm[1];
+			}
+			if ( ! empty( $v_src ) ) {
+				if ( strpos( $v_src, 'http' ) !== 0 && ! empty( $original_url ) && function_exists( 'uprs_resolve_relative_url' ) ) {
+					$v_src = uprs_resolve_relative_url( $original_url, $v_src );
+				}
+				$v_poster = '';
+				if ( preg_match( '/poster=["\']([^"\']+)["\']/i', $v_attrs, $pm ) ) {
+					$v_poster = basename( parse_url( $pm[1], PHP_URL_PATH ) );
+				}
+				$detected_videos[] = array(
+					'src'    => $v_src,
+					'poster' => $v_poster,
+				);
+			}
+		}
+	}
+
+	// 7. Post-process assets to deterministically eliminate any broken images, diversify media, and preserve motion
+	upr_transpiler_post_process_assets( $src_dir, $target_path . '/public', $detected_videos );
 
 	// Save transpilation metadata
 	$meta = array(
@@ -493,7 +521,7 @@ function upr_transpiler_sanitize_dom( $html, $target_path = '' ) {
 /**
  * Deterministic Post-Processor: Ensures all image references in generated React code exist on disk
  */
-function upr_transpiler_post_process_assets( $src_dir, $public_dir ) {
+function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_videos = array() ) {
 	if ( ! is_dir( $src_dir ) || ! is_dir( $public_dir ) ) {
 		return;
 	}
@@ -611,24 +639,34 @@ function upr_transpiler_post_process_assets( $src_dir, $public_dir ) {
 			}
 		}
 
-		// Hero: Ensure startframe videos are rendered with autoplaying motion
-		if ( $filename_base === 'Hero.tsx' || $filename_base === 'Hero.ts' ) {
+		// Hero: Ensure captured motion videos from the target webpage are rendered with autoplaying motion
+		if ( ( $filename_base === 'Hero.tsx' || $filename_base === 'Hero.ts' ) && ! empty( $detected_videos ) ) {
 			if ( strpos( $code, '<video' ) === false ) {
-				foreach ( $files_on_disk as $fod ) {
-					if ( strpos( $fod, 'startframe' ) !== false && ( strpos( $fod, 'hero' ) !== false || strpos( $fod, 'iphone' ) !== false ) ) {
-						$startframe_path = '/' . $fod;
-						$code = preg_replace(
-							'/<img\b([^>]*src=["\'][^"\']*(?:hero_iphone_18_pro|hero)[^"\']*["\'][^>]*)>/i',
-							'<video playsInline muted autoPlay loop poster="' . $startframe_path . '" className="w-full h-full object-cover object-bottom"><source src="https://www.apple.com/105/media/us/home/2026/6f46e780-4ab4-4688-915a-7aa0694378e3/anim/hero/largetall.mp4" type="video/mp4" /><img $1 /></video>',
-							$code,
-							1,
-							$v_count
-						);
-						if ( $v_count > 0 ) {
-							$modified = true;
+				$primary_video = $detected_videos[0];
+				$v_src = esc_url( $primary_video['src'] );
+
+				$poster_attr = '';
+				if ( ! empty( $primary_video['poster'] ) && in_array( $primary_video['poster'], $files_on_disk, true ) ) {
+					$poster_attr = ' poster="/' . $primary_video['poster'] . '"';
+				} else {
+					foreach ( $files_on_disk as $fod ) {
+						if ( stripos( $fod, 'startframe' ) !== false || stripos( $fod, 'poster' ) !== false ) {
+							$poster_attr = ' poster="/' . $fod . '"';
+							break;
 						}
-						break;
 					}
+				}
+
+				// Universally wrap primary hero visual image with the authentic video element
+				$code = preg_replace(
+					'/<img\b([^>]*className=["\'][^"\']*(?:w-full|object-cover|hero)[^"\']*)>/i',
+					'<video playsInline muted autoPlay loop' . $poster_attr . ' className="w-full h-full object-cover object-bottom"><source src="' . $v_src . '" type="video/mp4" /><img $1 /></video>',
+					$code,
+					1,
+					$v_count
+				);
+				if ( $v_count > 0 ) {
+					$modified = true;
 				}
 			}
 		}
