@@ -187,6 +187,18 @@ function upr_transpiler_scaffold_project( $target_path, $format, $title ) {
 			)
 		);
 
+		// Extract CSS keyframes from scraped stylesheets to preserve original animations
+		$keyframes_css = '';
+		$css_files = glob( $raw_dir . '/*.css' );
+		if ( ! empty( $css_files ) ) {
+			foreach ( $css_files as $cf ) {
+				$css_content = file_get_contents( $cf );
+				if ( preg_match_all( '/@keyframes\s+[a-zA-Z0-9_-]+\s*\{(?:\s*[^{}]*\{[^{}]*\})*\s*\}/is', $css_content, $kf_matches ) ) {
+					$keyframes_css .= "\n/* Animations from " . basename( $cf ) . " */\n" . implode( "\n", $kf_matches[0] ) . "\n";
+				}
+			}
+		}
+
 		if ( strpos( $format, 'tailwind' ) !== false ) {
 			$pkg['devDependencies']['tailwindcss'] = '^3.4.11';
 			$pkg['devDependencies']['postcss'] = '^8.4.47';
@@ -197,9 +209,9 @@ function upr_transpiler_scaffold_project( $target_path, $format, $title ) {
 			// postcss.config.js
 			file_put_contents( $target_path . '/postcss.config.js', "export default {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n}\n" );
 			// src/index.css
-			file_put_contents( $src_dir . '/index.css', "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\nbody {\n  margin: 0;\n  font-family: system-ui, -apple-system, sans-serif;\n}\n" );
+			file_put_contents( $src_dir . '/index.css', "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\nbody {\n  margin: 0;\n  font-family: system-ui, -apple-system, sans-serif;\n}\n" . $keyframes_css );
 		} else {
-			file_put_contents( $src_dir . '/index.css', "body {\n  margin: 0;\n  font-family: system-ui, -apple-system, sans-serif;\n}\n" );
+			file_put_contents( $src_dir . '/index.css', "body {\n  margin: 0;\n  font-family: system-ui, -apple-system, sans-serif;\n}\n" . $keyframes_css );
 		}
 
 		file_put_contents( $target_path . '/package.json', json_encode( $pkg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) );
@@ -313,6 +325,66 @@ function upr_transpiler_sanitize_dom( $html ) {
 	// Strip huge SVG path coordinates and replace with lightweight icon tag
 	$clean = preg_replace( '/<svg\b[^>]*>.*?<\/svg>/is', '<svg data-icon="icon" class="w-5 h-5 inline-block"></svg>', $clean );
 
+	// Simplify <picture> elements into direct high-resolution <img> tags with exact local paths
+	$clean = preg_replace_callback( '/<picture\b([^>]*)>(.*?)<\/picture>/is', function( $matches ) {
+		$picture_attrs = $matches[1];
+		$inner = $matches[2];
+
+		$alt = '';
+		if ( preg_match( '/alt=["\']([^"\']*)["\']/i', $inner, $m ) ) {
+			$alt = $m[1];
+		}
+
+		$class = '';
+		if ( preg_match( '/class=["\']([^"\']*)["\']/i', $picture_attrs, $m ) ) {
+			$class = $m[1];
+		}
+
+		$candidates = array();
+		if ( preg_match_all( '/<source[^>]+srcset=["\']([^"\']+)["\']/i', $inner, $sources ) ) {
+			foreach ( $sources[1] as $src_str ) {
+				$urls = explode( ',', $src_str );
+				foreach ( $urls as $u ) {
+					$parts = preg_split( '/\s+/', trim( $u ) );
+					if ( ! empty( $parts[0] ) && strpos( $parts[0], 'data:' ) !== 0 ) {
+						$candidates[] = $parts[0];
+					}
+				}
+			}
+		}
+		if ( preg_match( '/<img[^>]+src=["\']([^"\']+)["\']/i', $inner, $img_m ) ) {
+			if ( strpos( $img_m[1], 'data:' ) !== 0 ) {
+				$candidates[] = $img_m[1];
+			}
+		}
+
+		$best = '';
+		foreach ( $candidates as $c ) {
+			if ( strpos( $c, '_largetall' ) !== false || strpos( $c, '_large' ) !== false ) {
+				$best = $c;
+				break;
+			}
+		}
+		if ( empty( $best ) ) {
+			foreach ( $candidates as $c ) {
+				if ( strpos( $c, '_medium' ) !== false ) {
+					$best = $c;
+					break;
+				}
+			}
+		}
+		if ( empty( $best ) && ! empty( $candidates ) ) {
+			$best = end( $candidates );
+		}
+
+		if ( empty( $best ) ) {
+			return '<img src="/placeholder.png" alt="' . htmlspecialchars( $alt, ENT_QUOTES ) . '" class="' . htmlspecialchars( $class, ENT_QUOTES ) . '" />';
+		}
+
+		$filename = basename( parse_url( $best, PHP_URL_PATH ) );
+		return '<img src="/' . ltrim( $filename, '/' ) . '" alt="' . htmlspecialchars( $alt, ENT_QUOTES ) . '" class="' . htmlspecialchars( $class, ENT_QUOTES ) . '" />';
+	}, $clean );
+
 	// Strip data attributes that bloat DOM (analytics, anim, tracking, etc.)
 	$clean = preg_replace( '/\s+data-(?:analytics|anim|viewport|feature|focus|module|unit)[a-z0-9_-]*="[^"]*"/i', '', $clean );
 	$clean = preg_replace( '/\s+aria-(?:hidden|label|describedby)="[^"]*"/i', '', $clean );
@@ -325,14 +397,14 @@ function upr_transpiler_sanitize_dom( $html ) {
 	// Clean up extra whitespace and empty tags
 	$clean = preg_replace( '/\n\s*\n/', "\n", $clean );
 
-	// Limit styles to key rules (up to 20k chars)
-	if ( strlen( $styles ) > 20000 ) {
-		$styles = substr( $styles, 0, 20000 ) . "\n/* ... styles truncated for brevity ... */";
+	// Limit styles to key rules (up to 25k chars)
+	if ( strlen( $styles ) > 25000 ) {
+		$styles = substr( $styles, 0, 25000 ) . "\n/* ... styles truncated for brevity ... */";
 	}
 
-	// Keep up to 120k chars of clean HTML so Gemini sees the entire page (heroes, promos, footer)
-	if ( strlen( $clean ) > 120000 ) {
-		$clean = substr( $clean, 0, 120000 );
+	// Keep up to 400k chars of clean HTML so Gemini sees the entire page (heroes, promos, dual carousels, full footer)
+	if ( strlen( $clean ) > 400000 ) {
+		$clean = substr( $clean, 0, 400000 );
 	}
 
 	return array(
@@ -408,36 +480,46 @@ AVAILABLE LOCAL ASSETS (Stored in public/ - Reference directly with leading slas
 {$asset_manifest}
 
 CRITICAL HIGH-FIDELITY DESIGN & LAYOUT RULES:
-1. REAL LOCAL IMAGES:
-   - You MUST use the exact file paths from 'AVAILABLE LOCAL ASSETS' above in your `img src` tags (e.g. `src=\"/hero_iphone16pro_avail...large.jpg\"`).
-   - NEVER hallucinate external stock photo URLs or leave tiny empty boxes.
-2. HERO SECTIONS (FULL-BLEED & IMPACTFUL):
-   - Hero container MUST be full width with generous vertical height: `w-full min-h-[580px] lg:min-h-[660px] flex flex-col items-center justify-between text-center relative overflow-hidden py-12 px-4`.
-   - Hero Product Images MUST NOT BE TINY THUMBNAILS: Use `w-full max-w-[850px] lg:max-w-[1050px] object-contain mx-auto mt-6` so the product commands the viewport just like Apple's official showcase.
-   - Typography: Bold headline (`text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight`), subheadline (`text-xl sm:text-2xl mt-2 text-neutral-300 font-normal`), and pill CTAs (`bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 py-2 text-sm font-medium`, `border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white rounded-full px-5 py-2 text-sm font-medium transition-colors`).
-3. PROMO CARDS (GRID):
-   - 2-column responsive grid on desktop: `grid grid-cols-1 md:grid-cols-2 gap-4 max-w-[1280px] mx-auto px-4 my-4`.
-   - Card container: `min-h-[500px] flex flex-col items-center justify-between p-8 rounded-3xl overflow-hidden text-center relative bg-[#f5f5f7] text-neutral-900`.
-   - Card product image: `w-full max-w-[400px] object-contain mt-6`.
+1. EXACT LOCAL IMAGE BINDING (DO NOT HALLUCINATE OR REPEAT PRO PHONE):
+   - The Captured HTML below ALREADY contains the exact localized image paths in '<img src=\"/...\" />' tags!
+   - You MUST extract and use the exact 'src' from each corresponding section in the Captured HTML:
+     * Hero 1 (iPhone 18 Pro): Dark theme ('bg-black text-white'), use '/hero_iphone_18_pro_preorder__dd68unjbzswi_large.jpg'.
+     * Hero 2 (iPhone Duo): Light theme ('bg-[#f5f5f7] text-neutral-900'), MUST use the unfolded folding device held in two hands: '/hero_iphone_duo_announce__fh4u8yzndpe2_largetall.jpg'. NEVER repeat the Pro phone image here!
+     * Hero 3 (Apple Watch Series 12): Dark theme ('bg-black text-white'), MUST use the centered dual watches image: '/hero_apple_watch_series_12_preorder__cv2wd7ow8926_largetall.jpg' with logo '/hero_logo_apple_watch_series_12__eze8r897c5me_large.png'.
+2. HERO SECTIONS (SCALE & CENTERING):
+   - Hero container: 'w-full min-h-[580px] lg:min-h-[660px] flex flex-col items-center justify-between text-center relative overflow-hidden py-12 px-4'.
+   - Product images MUST NOT be tiny thumbnails: Use 'w-full max-w-[850px] lg:max-w-[1050px] object-contain mx-auto mt-6' (Watch image centered and large!).
+   - Typography: Bold headline ('text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight'), subheadline ('text-xl sm:text-2xl mt-2 text-neutral-300 font-normal'), and pill CTAs ('bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 py-2 text-sm font-medium', 'border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white rounded-full px-5 py-2 text-sm font-medium transition-colors').
+3. PROMO CARDS (FULL-BLEED EDGE-TO-EDGE ARTWORK):
+   - 2-column responsive grid on desktop: 'grid grid-cols-1 md:grid-cols-2 gap-4 max-w-[1280px] mx-auto px-4 my-4'.
+   - EVERY PROMO CARD MUST HAVE FULL-BLEED EDGE-TO-EDGE BACKGROUND ARTWORK (like Apple.com):
+     Outer container: relative min-h-[560px] rounded-3xl overflow-hidden flex flex-col justify-between items-center text-center p-8 bg-neutral-900.
+     Image element: '<img src=\"/promo_airpods_5__large.jpg\" alt=\"AirPods 5\" className=\"absolute inset-0 w-full h-full object-cover object-center\" />'.
+     Text overlay container: relative z-10 flex flex-col items-center with title, subhead, and CTA pill links.
+   - Cards in grid: Watch Ultra 4, AirPods 5, iCloud+, MacBook Air, Apple Upgrade, Apple Card.
+   - Use the exact full-bleed artwork image path for each card from the Captured HTML.
 4. MOBILE NAVIGATION (FULL-SCREEN DRAWER):
-   - In Navbar.tsx, implement a mobile drawer with `useState(false)` and hamburger toggle icons (`Menu` and `X` from 'lucide-react').
-   - When opened on mobile, it MUST NOT be a tiny cramped box. It MUST be a full-screen drawer: `fixed inset-x-0 top-12 bottom-0 bg-neutral-950/95 backdrop-blur-2xl z-50 flex flex-col px-8 py-8 space-y-4 overflow-y-auto`.
-   - Links inside mobile drawer: `text-2xl font-semibold text-neutral-200 hover:text-white transition-colors border-b border-neutral-800/80 pb-3 block`.
-5. INTERACTIVE CAROUSEL / SLIDER (src/components/Carousel.{$ext}):
-   - You MUST create an interactive, animated Carousel / Slider component (e.g. Apple TV+ slider, product showcase, or testimonials carousel).
-   - Component state & features:
-     * `const [currentIndex, setCurrentIndex] = useState(0);`
-     * `const [isPlaying, setIsPlaying] = useState(true);`
-     * Auto-advance: `useEffect` with `setInterval` advancing slide every 4 seconds when `isPlaying` is true.
-     * Previous / Next buttons: Chevron buttons using `ChevronLeft` and `ChevronRight` from 'lucide-react' (`p-3 rounded-full bg-neutral-900/60 hover:bg-neutral-800 text-white backdrop-blur-md transition-all shadow-lg`).
-     * Pagination dots / pill bar: Clicking any dot jumps to slide (`onClick={() => setCurrentIndex(idx)}`). Active dot expands with `w-8 bg-white transition-all duration-300`, inactive dots `w-2.5 bg-neutral-500 hover:bg-neutral-400`.
-     * Play/Pause toggle button with `Play` and `Pause` icons from 'lucide-react'.
-     * Smooth slide transition: Container with `flex transition-transform duration-700 ease-out` using `style={{ transform: 'translateX(-' + (currentIndex * 100) + '%)' }}`.
-     * Slide cards: Rounded poster cards with images from AVAILABLE LOCAL ASSETS, title, description, and 'Stream now' or 'Learn more' pill CTA.
-6. MICRO-INTERACTIONS & SMOOTH ANIMATIONS:
-   - Navbar: Sticky top with backdrop blur (`sticky top-0 z-40 bg-neutral-900/80 backdrop-blur-md border-b border-neutral-800/60 transition-colors`).
-   - Cards: Subtle hover lift and glow (`transition-all duration-300 hover:scale-[1.01] hover:shadow-2xl`).
-   - Buttons: Responsive hover & click states (`transition-all duration-200 active:scale-95 hover:brightness-110`).
+   - In Navbar.tsx, implement a mobile drawer with useState(false) and hamburger toggle icons ('Menu' and 'X' from 'lucide-react').
+   - When opened on mobile, it MUST be a full-screen drawer: 'fixed inset-x-0 top-12 bottom-0 bg-neutral-950/95 backdrop-blur-2xl z-50 flex flex-col px-8 py-8 space-y-4 overflow-y-auto'.
+   - Links inside mobile drawer: 'text-2xl font-semibold text-neutral-200 hover:text-white transition-colors border-b border-neutral-800/80 pb-3 block'.
+5. DUAL CAROUSELS (src/components/Carousel.{$ext}):
+   - Implement BOTH carousels found in the Captured HTML under 'Endless entertainment':
+     A) **Carousel 1: Apple TV+ 3-Card Continuous Filmstrip Slider**:
+        - Shows **3 slides visible simultaneously** across the screen:
+          * Active center card: 'w-[65vw] max-w-[980px] h-[460px] lg:h-[540px] rounded-2xl shadow-2xl relative overflow-hidden flex-shrink-0 transition-all duration-700'.
+          * Left & right adjacent cards: 'w-[48vw] max-w-[700px] h-[460px] lg:h-[540px] opacity-40 hover:opacity-80 scale-95 hover:scale-100 rounded-2xl overflow-hidden flex-shrink-0 transition-all duration-700 cursor-pointer'.
+        - Track: 'flex items-center justify-center gap-6 transition-transform duration-700 ease-out'.
+        - Slide content: Full poster image covering card ('absolute inset-0 w-full h-full object-cover'), movie title/logo overlay, genre badge, 'Stream now' pill CTA with Play icon.
+        - Controls: Chevron buttons ('ChevronLeft', 'ChevronRight'), auto-advancing useEffect (4s), play/pause toggle ('Play', 'Pause'), and interactive expanding pagination pill dots.
+        - Slides: Widow's Bay, Severance, The Morning Show, Ted Lasso, Foundation (using real poster images from Captured HTML).
+     B) **Carousel 2: Stream Reel / Category Ribbon**:
+        - Horizontal scrolling card strip right below Carousel 1: 'flex gap-4 overflow-x-auto py-6 px-4 scrollbar-none'.
+        - Secondary thumbnail cards (Fitness+, Hello Kitty, Dolly Parton, etc.) with rounded corners and subtle hover zoom.
+6. COMPLETE FOOTER DIRECTORY (ALL 11 COLUMNS & LEGAL):
+   - In src/components/Footer.{$ext}, you MUST include the complete Apple directory exactly as captured in the DOM:
+     - All 11 directory columns: Shop and Learn, Apple Wallet, Account, Entertainment, Apple Store, For Business, For Education, For Healthcare, For Government, Apple Values, About Apple.
+     - Complete legal footnotes section at the top of the footer.
+     - Copyright notice ('Copyright © 2026 Apple Inc. All rights reserved.'), legal links ('Privacy Policy', 'Terms of Use', 'Sales and Refunds', 'Legal', 'Site Map'), and country selector ('United States').
 7. OUTPUT STRUCTURE:
    - Output ONLY the UI components under 'src/':
      * src/App.{$ext} (default export App, assembling Navbar, Hero, PromoGrid, Carousel, and Footer)
