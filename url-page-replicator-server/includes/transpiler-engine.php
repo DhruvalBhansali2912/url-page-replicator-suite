@@ -839,26 +839,27 @@ function upr_transpiler_post_process_assets( $src_dir, $public_dir, $detected_vi
 				}
 			}
 		}
-		// Navbar: Enforce authentic clean mobile navigation overlay (NO fake search inputs, NO chevrons, NO divider borders)
+		// Navbar: Enforce authentic clean mobile navigation overlay (targeted safely to mobile drawer only)
 		if ( $filename_base === 'Navbar.tsx' || $filename_base === 'Navbar.ts' ) {
-			// 1. Remove Chevron icons import and JSX
-			$code = preg_replace( '/\s*,\s*Chevron(?:Right|Left|Down|Up)/', '', $code );
-			$code = preg_replace( '/Chevron(?:Right|Left|Down|Up)\s*,\s*/', '', $code );
-			$code = preg_replace( '/<Chevron(?:Right|Left|Down|Up)\b[^>]*\/?>/i', '', $code );
-
-			// 2. Remove fake SearchOverlay block
-			$code = preg_replace( '/\{searchOpen\s*&&\s*\([\s\S]*?\)\s*\}/i', '', $code );
-
-			// 3. Remove divider borders from mobile drawer links
-			$code = preg_replace( '/border-b(?:\s+border-(?:\[[^\]]+\]|[a-z0-9\-_]+)(?:\/\d+)?)?/i', '', $code );
-
-			// 4. Align items to left (not justify-between) and set pure white overlay
-			$code = str_replace( 'justify-between', 'justify-start', $code );
-			$code = str_replace( 'bg-[#f5f5f7]', 'bg-white', $code );
-			$code = str_replace( 'h-[calc(100vh-48px)]', 'h-screen', $code );
-			$code = str_replace( 'top-12', 'top-0', $code );
-
-			$modified = true;
+			if ( preg_match( '/(\{mobileMenuOpen\s*&&\s*\([\s\S]*?\n\s*\}\s*\))/i', $code, $mm ) ) {
+				$drawer = $mm[1];
+				// Remove chevrons inside drawer
+				$drawer = preg_replace( '/<Chevron(?:Right|Left|Down|Up)\b[^>]*\/?>/i', '', $drawer );
+				// Remove divider borders inside drawer
+				$drawer = preg_replace( '/\bborder-b\b(?:\s+border-(?:\[[^\]]+\]|[a-z0-9\-_]+)(?:\/\d+)?)?/i', '', $drawer );
+				// Replace grey background with pure white overlay
+				$drawer = str_replace( 'bg-[#f5f5f7]', 'bg-white', $drawer );
+				$drawer = str_replace( 'h-[calc(100vh-48px)]', 'h-screen', $drawer );
+				$drawer = str_replace( 'top-12', 'top-0', $drawer );
+				$code = str_replace( $mm[1], $drawer, $code );
+				$modified = true;
+			}
+			// Remove unused Chevron imports if no Chevrons remain in the file
+			if ( strpos( $code, '<Chevron' ) === false ) {
+				$code = preg_replace( '/\s*,\s*Chevron(?:Right|Left|Down|Up)/', '', $code );
+				$code = preg_replace( '/Chevron(?:Right|Left|Down|Up)\s*,\s*/', '', $code );
+				$modified = true;
+			}
 		}
 
 
